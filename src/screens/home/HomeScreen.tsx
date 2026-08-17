@@ -1,8 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TextInput, TouchableOpacity, Image, Platform, StatusBar, Animated, Easing, TouchableWithoutFeedback } from 'react-native';
+import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Image, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
 const UPCOMING_TRIPS = [
   {
@@ -99,7 +98,7 @@ const HomeScreen = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.container}>
-        
+
         {/* Header Section */}
         <View style={styles.header}>
           <View>
@@ -113,21 +112,21 @@ const HomeScreen = () => {
         </View>
 
         {/* Active Trip Card */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.activeCard}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('LiveTracking')}
         >
-          <Image 
-            source={{ uri: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=800' }} 
-            style={[StyleSheet.absoluteFillObject, { borderRadius: 16 }]} 
+          <Image
+            source={{ uri: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=800' }}
+            style={[StyleSheet.absoluteFillObject, { borderRadius: 16 }]}
           />
           {/* Lớp phủ đen nhạt hơn để ảnh rõ nét hơn */}
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 16 }]} />
-          
+
           <View style={styles.activeCardBgWatermarkContainer}>
-            <Image 
-              source={require('../../assets/images/logoapp.png')} 
+            <Image
+              source={require('../../assets/images/logoapp.png')}
               style={{ width: 160, height: 160, resizeMode: 'contain' }}
               tintColor="#FFFFFF"
             />
@@ -140,12 +139,12 @@ const HomeScreen = () => {
           </View>
 
           <Text style={styles.activeCardTitle}>Hà Giang Loop 2024</Text>
-          
+
           <View style={styles.progressRow}>
             <View style={[styles.dot, { backgroundColor: '#FF3B30' }]} />
             <Text style={styles.progressText}>Km 198/356</Text>
           </View>
-          
+
           <View style={styles.progressRow}>
             <View style={[styles.dot, { backgroundColor: '#E08552' }]} />
             <Text style={styles.progressText}>Trạm dừng chân gần nhất còn 15 km</Text>
@@ -153,7 +152,7 @@ const HomeScreen = () => {
 
           <View style={styles.avatarsWrapper}>
             {avatars.map((uri, index) => (
-              <Image 
+              <Image
                 key={index}
                 source={{ uri }}
                 style={[styles.smallAvatar, { marginLeft: index === 0 ? 0 : -10 }]}
@@ -180,14 +179,14 @@ const HomeScreen = () => {
         </View>
 
         {UPCOMING_TRIPS.map((trip) => (
-          <TouchableOpacity 
-            key={trip.id} 
+          <TouchableOpacity
+            key={trip.id}
             style={styles.upcomingCard}
             onPress={() => navigation.navigate('TripDetails')}
           >
-            <Image 
-              source={{ uri: trip.image }} 
-              style={[StyleSheet.absoluteFillObject, { borderRadius: 14 }]} 
+            <Image
+              source={{ uri: trip.image }}
+              style={[StyleSheet.absoluteFillObject, { borderRadius: 14 }]}
             />
             {/* Lớp phủ đen để nổi bật chữ trắng */}
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14 }]} />
@@ -208,7 +207,7 @@ const HomeScreen = () => {
             <View style={styles.upcomingBottomRow}>
               <View style={styles.avatarsWrapper}>
                 {avatars.map((uri, index) => (
-                  <Image 
+                  <Image
                     key={index}
                     source={{ uri }}
                     style={[styles.smallAvatar, { marginLeft: index === 0 ? 0 : -10, width: 28, height: 28, borderRadius: 14 }]}
@@ -231,8 +230,8 @@ const HomeScreen = () => {
       </ScrollView>
 
       {/* FAB Overlay Background */}
-      <Animated.View 
-        style={[styles.modalOverlay, { opacity: overlayOpacity }]} 
+      <Animated.View
+        style={[styles.modalOverlay, { opacity: overlayOpacity }]}
         pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
       >
         <TouchableWithoutFeedback onPress={() => setIsFabMenuVisible(false)}>
@@ -243,27 +242,27 @@ const HomeScreen = () => {
       {/* FAB and Items Container */}
       <View style={styles.fabContainer} pointerEvents="box-none">
         {/* Item 3: Chuyến đi mới (Top) */}
-        <Animated.View 
-          style={[styles.fabMenuItemContainer, { opacity: newTripOpacity, transform: [{ translateY: newTripTranslateY }] }]} 
+        <Animated.View
+          style={[styles.fabMenuItemContainer, { opacity: newTripOpacity, transform: [{ translateY: newTripTranslateY }] }]}
           pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
         >
-          <TouchableOpacity 
-            style={styles.fabMenuItem} 
+          <TouchableOpacity
+            style={styles.fabMenuItem}
             onPress={() => {
               setIsFabMenuVisible(false);
               navigation.navigate('CreateTrip');
             }}
           >
-            <Text style={styles.fabMenuItemText}>Chuyến đi mới</Text>
+            <Text style={styles.fabMenuItemText}>Tạo Chuyến đi mới</Text>
             <View style={styles.fabMenuIcon}>
               <Feather name="plus" size={20} color="#CD8554" />
             </View>
           </TouchableOpacity>
         </Animated.View>
-        
+
         {/* Item 2: Nhập mã mời (Middle) */}
-        <Animated.View 
-          style={[styles.fabMenuItemContainer, { opacity: inviteOpacity, transform: [{ translateY: inviteTranslateY }] }]} 
+        <Animated.View
+          style={[styles.fabMenuItemContainer, { opacity: inviteOpacity, transform: [{ translateY: inviteTranslateY }] }]}
           pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
         >
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => setIsFabMenuVisible(false)}>
@@ -275,8 +274,8 @@ const HomeScreen = () => {
         </Animated.View>
 
         {/* Item 1: Quét mã QR (Bottom) */}
-        <Animated.View 
-          style={[styles.fabMenuItemContainer, { opacity: qrOpacity, transform: [{ translateY: qrTranslateY }] }]} 
+        <Animated.View
+          style={[styles.fabMenuItemContainer, { opacity: qrOpacity, transform: [{ translateY: qrTranslateY }] }]}
           pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
         >
           <TouchableOpacity style={styles.fabMenuItem} onPress={() => setIsFabMenuVisible(false)}>
@@ -288,7 +287,7 @@ const HomeScreen = () => {
         </Animated.View>
 
         {/* Floating Action Button */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.fab}
           activeOpacity={0.8}
           onPress={() => setIsFabMenuVisible(!isFabMenuVisible)}
