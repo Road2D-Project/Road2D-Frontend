@@ -1,4 +1,4 @@
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, AntDesign } from '@expo/vector-icons';
 import React from 'react';
 import {
   Image,
@@ -7,10 +7,19 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { colors } from '../../theme/colors';
+import { Button } from '../../components/ui/Button';
+
+/**
+ * Google G logo — Sử dụng AntDesign từ @expo/vector-icons
+ * (Icon đơn sắc trắng chuẩn, đảm bảo 100% hiển thị không phụ thuộc mạng)
+ */
+const GoogleGLogo = () => (
+  <AntDesign name="google" size={22} color="#FFFFFF" style={{ marginRight: 8 }} />
+);
+
 
 const LoginScreen = ({ navigation }: any) => {
   return (
@@ -35,37 +44,38 @@ const LoginScreen = ({ navigation }: any) => {
             />
           </View>
 
+          {/* Dùng Text trực tiếp để font UTM Facebook apply chắc chắn */}
           <Text style={styles.title}>Road2D</Text>
-          <Text style={styles.subtitle}>"Cùng nhau trên mọi chặng đường" </Text>
+          <Text style={styles.subtitle}>"Cùng nhau trên mọi chặng đường"</Text>
         </View>
 
         <View style={styles.bottomContainer}>
-          <TouchableOpacity
-            style={styles.button}
+          <Button
+            title="Tiếp tục với Số điện thoại"
+            size="lg"
+            style={{ backgroundColor: colors.authButtonBg }}
+            leftIcon={<FontAwesome name="mobile-phone" size={26} color="#FFF" />}
             onPress={() => navigation.navigate('Home')}
-          >
-            <View style={styles.iconContainer}>
-              <FontAwesome name="mobile-phone" size={26} color="#FFF" />
-            </View>
-            <Text style={styles.buttonText}>Tiếp tục với Số điện thoại</Text>
-          </TouchableOpacity>
+          />
 
-          <TouchableOpacity
-            style={[styles.button, styles.buttonOutline]}
+          {/* Google button: text trắng, logo G 5 màu */}
+          <Button
+            title="Tiếp tục với Google"
+            variant="outline"
+            size="lg"
+            style={styles.buttonOutline}
+            textStyle={{ color: '#FFFFFF' }}
+            leftIcon={<GoogleGLogo />}
             onPress={() => navigation.navigate('Home')}
-          >
-            <View style={styles.iconContainer}>
-              <Image
-                source={{ uri: 'https://img.icons8.com/color/48/000000/google-logo.png' }}
-                style={{ width: 24, height: 24 }}
-              />
-            </View>
-            <Text style={styles.buttonText}>Tiếp tục với Google</Text>
-          </TouchableOpacity>
+          />
 
+          {/* Terms — màu nâu vàng sáng, dễ đọc */}
           <Text style={styles.termsText}>
-            Bằng cách tiếp tục, bạn đồng ý với <Text style={styles.linkText}>Điều khoản Sử dụng</Text>
-            {'\n'}và <Text style={styles.linkText}>Chính sách Quyền riêng tư</Text> của chúng tôi
+            {'Bằng cách tiếp tục, bạn đồng ý với '}
+            <Text style={styles.linkText}>Điều khoản Sử dụng</Text>
+            {' và '}
+            <Text style={styles.linkText}>Chính sách Quyền riêng tư</Text>
+            {' của chúng tôi'}
           </Text>
         </View>
       </View>
@@ -83,7 +93,7 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)', // Tối màu nền 1 chút để nổi chữ
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   content: {
@@ -103,8 +113,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 0,
-    marginTop: 25,
-    // Đổ bóng cam nâu
+    marginTop: 30,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
@@ -117,63 +126,41 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
   },
   title: {
-    fontSize: 40,
-    color: colors.textLight,
+    fontSize: 38,
+    // KHÔNG dùng fontWeight khi đã dùng custom font:
+    // fontWeight:'bold' sẽ fallback về system font vì không có file UTM Facebook Bold.ttf
+    fontFamily: 'UTM Facebook',
+    color: '#FFFFFF',
     marginBottom: 8,
-    marginTop: -48,
-    fontFamily: 'UTM Facebook', // Font này sẽ tự nhận nếu bạn cài đặt file ttf
+    marginTop: -55,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: 'rgba(255,255,255,0.8)',
     fontStyle: 'italic',
-    marginTop: -7,
-    paddingHorizontal: 4, // Fix lỗi bị cắt mất dấu ngoặc kép khi in nghiêng
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: -4,
+    textAlign: 'center',
   },
   bottomContainer: {
     width: '100%',
     gap: 16,
   },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.authButtonBg,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
   buttonOutline: {
-    backgroundColor: 'transparent',
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  iconContainer: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  buttonText: {
-    color: colors.textLight,
-    fontSize: 16,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'center',
-    marginRight: 40,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   termsText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
+    marginTop: 16,
+    lineHeight: 22,
+    color: '#D4A96A',
+    fontSize: 13,
     textAlign: 'center',
-    marginTop: 24,
-    lineHeight: 18,
   },
   linkText: {
-    color: colors.primary,
-    fontWeight: '500',
     textDecorationLine: 'underline',
+    color: '#F0C88A',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });
 

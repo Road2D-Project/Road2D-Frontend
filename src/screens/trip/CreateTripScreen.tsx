@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Switch, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Switch, TextInput, Platform, StatusBar } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 
@@ -15,7 +16,7 @@ const CreateTripScreen = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Image source={{ uri: 'https://img.icons8.com/material-outlined/24/3E2723/back.png' }} style={styles.icon} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Thiết lập chuyến đi</Text>
         <View style={{ width: 40 }} /> {/* Spacer */}
@@ -52,7 +53,7 @@ const CreateTripScreen = () => {
           <Text style={styles.sectionTitle}>Thời gian xuất phát dự kiến</Text>
           <TouchableOpacity style={styles.inputBox}>
             <Text style={styles.inputText}>05:00 Sáng - 24/12/2026</Text>
-            <Image source={{ uri: 'https://img.icons8.com/material-outlined/20/795548/calendar.png' }} style={styles.inputIcon} />
+            <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -60,7 +61,7 @@ const CreateTripScreen = () => {
           <Text style={styles.sectionTitle}>Giới hạn thành viên</Text>
           <TouchableOpacity style={styles.inputBox}>
             <Text style={styles.inputText}>Tối đa 15 người</Text>
-            <Image source={{ uri: 'https://img.icons8.com/material-outlined/20/795548/conference.png' }} style={styles.inputIcon} />
+            <Ionicons name="people-outline" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
 

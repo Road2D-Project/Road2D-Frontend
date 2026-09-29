@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 
@@ -114,7 +115,12 @@ const TripDetailsScreen = () => {
       {['Hôm nay', 'Ngày mai', 'Ngày mốt'].map((day, idx) => (
         <View key={idx} style={styles.weatherRow}>
           <Text style={styles.weatherDay}>{day}</Text>
-          <Image source={{ uri: idx === 0 ? 'https://img.icons8.com/color/48/000000/partly-cloudy-day--v1.png' : 'https://img.icons8.com/color/48/000000/sun--v1.png' }} style={styles.weatherIcon} />
+          <Ionicons
+            name={idx === 0 ? 'partly-sunny' : 'sunny'}
+            size={28}
+            color={idx === 0 ? '#78909C' : '#FFC107'}
+            style={styles.weatherIcon}
+          />
           <View style={styles.weatherTemp}>
             <Text style={styles.tempHigh}>22°</Text>
             <Text style={styles.tempLow}>16°</Text>
@@ -145,7 +151,7 @@ const TripDetailsScreen = () => {
         <View style={styles.imageContainer}>
           <Image source={{ uri: 'https://images.unsplash.com/photo-1599423423926-17b5db30303a?q=80&w=600' }} style={styles.headerImage} />
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Image source={{ uri: 'https://img.icons8.com/ios-filled/24/FFFFFF/back.png' }} style={styles.backIcon} />
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
@@ -200,7 +206,6 @@ const styles = StyleSheet.create({
   imageContainer: { width: '100%', height: 280 },
   headerImage: { width: '100%', height: '100%' },
   backButton: { position: 'absolute', top: Platform.OS === 'android' ? StatusBar.currentHeight! + 10 : 50, left: 20, width: 40, height: 40, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  backIcon: { width: 20, height: 20, marginRight: 2 },
   infoSection: { backgroundColor: colors.background, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -30, padding: 24, minHeight: 500 },
   breadcrumb: { fontSize: 12, color: colors.primary, fontWeight: 'bold', marginBottom: 4, textTransform: 'uppercase' },
   title: { fontSize: 28, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 16 },
@@ -266,7 +271,7 @@ const styles = StyleSheet.create({
   weatherAlertText: { color: '#E65100', fontSize: 13, fontWeight: 'bold' },
   weatherRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   weatherDay: { flex: 1, fontSize: 15, fontWeight: 'bold', color: colors.textPrimary },
-  weatherIcon: { width: 32, height: 32, marginRight: 16 },
+  weatherIcon: { marginRight: 16 },
   weatherTemp: { width: 60, alignItems: 'center' },
   tempHigh: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary },
   tempLow: { fontSize: 13, color: colors.textSecondary },

@@ -1,25 +1,46 @@
-import React, { useEffect } from 'react';
-import AppNavigator from './src/navigation/AppNavigator';
-import { useFonts } from 'expo-font';
+import 'react-native-gesture-handler';
+import React, { useEffect, useState } from 'react';
+import * as Font from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
+import { Ionicons } from '@expo/vector-icons';
+import AppNavigator from './src/navigation/AppNavigator';
+import { ErrorBoundary } from './src/components/common/ErrorBoundary';
 
-// Giữ splash screen hiển thị cho đến khi font được load xong
-SplashScreen.preventAutoHideAsync();
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function App() {
-  const [loaded, error] = useFonts({
-    'UTM Facebook': require('./src/assets/fonts/UTM Facebook.ttf'),
-  });
+  const [appIsReady, setAppIsReady] = useState(false);
 
   useEffect(() => {
-    if (loaded || error) {
-      SplashScreen.hideAsync();
+    async function prepare() {
+      try {
+        // Load custom fonts + icon fonts trước khi render app
+        await Font.loadAsync({
+          // Custom font
+          'UTM Facebook': require('./src/assets/fonts/UTM Facebook.ttf'),
+          // Pre-load Ionicons để icon hiện ngay (tránh lazy-load gây mất icon lần render đầu)
+          ...Ionicons.font,
+        });
+      } catch (e) {
+        console.warn('Error loading fonts:', e);
+      } finally {
+        setAppIsReady(true);
+        // Hide splash screen
+        await SplashScreen.hideAsync().catch(() => {});
+      }
     }
-  }, [loaded, error]);
 
-  if (!loaded && !error) {
+    prepare();
+  }, []);
+
+  if (!appIsReady) {
     return null;
   }
 
-  return <AppNavigator />;
+  return (
+    <ErrorBoundary>
+      <AppNavigator />
+    </ErrorBoundary>
+  );
 }

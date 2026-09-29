@@ -241,21 +241,15 @@ const HomeScreen = () => {
 
       {/* FAB and Items Container */}
       <View style={styles.fabContainer} pointerEvents="box-none">
-        {/* Item 3: Chuyến đi mới (Top) */}
+        {/* Item 3: Quét mã QR (Top) */}
         <Animated.View
           style={[styles.fabMenuItemContainer, { opacity: newTripOpacity, transform: [{ translateY: newTripTranslateY }] }]}
           pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
         >
-          <TouchableOpacity
-            style={styles.fabMenuItem}
-            onPress={() => {
-              setIsFabMenuVisible(false);
-              navigation.navigate('CreateTrip');
-            }}
-          >
-            <Text style={styles.fabMenuItemText}>Tạo Chuyến đi mới</Text>
+          <TouchableOpacity style={styles.fabMenuItem} onPress={() => setIsFabMenuVisible(false)}>
+            <Text style={styles.fabMenuItemText}>Quét mã QR</Text>
             <View style={styles.fabMenuIcon}>
-              <Feather name="plus" size={20} color="#CD8554" />
+              <MaterialCommunityIcons name="qrcode-scan" size={20} color="#CD8554" />
             </View>
           </TouchableOpacity>
         </Animated.View>
@@ -273,15 +267,21 @@ const HomeScreen = () => {
           </TouchableOpacity>
         </Animated.View>
 
-        {/* Item 1: Quét mã QR (Bottom) */}
+        {/* Item 1: Tạo chuyến đi mới (Bottom) */}
         <Animated.View
           style={[styles.fabMenuItemContainer, { opacity: qrOpacity, transform: [{ translateY: qrTranslateY }] }]}
           pointerEvents={isFabMenuVisible ? 'auto' : 'none'}
         >
-          <TouchableOpacity style={styles.fabMenuItem} onPress={() => setIsFabMenuVisible(false)}>
-            <Text style={styles.fabMenuItemText}>Quét mã QR</Text>
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setIsFabMenuVisible(false);
+              navigation.navigate('CreateTrip');
+            }}
+          >
+            <Text style={styles.fabMenuItemText}>Tạo chuyến đi mới</Text>
             <View style={styles.fabMenuIcon}>
-              <MaterialCommunityIcons name="qrcode-scan" size={20} color="#CD8554" />
+              <Feather name="plus" size={20} color="#CD8554" />
             </View>
           </TouchableOpacity>
         </Animated.View>

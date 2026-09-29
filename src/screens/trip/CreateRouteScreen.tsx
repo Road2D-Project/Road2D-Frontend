@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Image, TextInput, ScrollView, Platform, StatusBar } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 
@@ -49,7 +50,7 @@ const CreateRouteScreen = () => {
           <Image source={{ uri: coverImage }} style={styles.uploadedImg} />
         ) : (
           <>
-            <Image source={{ uri: 'https://img.icons8.com/material-outlined/48/795548/camera.png' }} style={styles.cameraIcon} />
+            <Ionicons name="camera-outline" size={40} color={colors.textSecondary} style={{ marginBottom: 8, opacity: 0.6 }} />
             <Text style={styles.uploadText}>Tải ảnh bìa lên</Text>
           </>
         )}
@@ -144,7 +145,7 @@ const CreateRouteScreen = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => step > 1 ? setStep(step - 1) : navigation.goBack()} style={styles.backBtn}>
-          <Image source={{ uri: 'https://img.icons8.com/material-outlined/24/3E2723/back.png' }} style={styles.backIcon} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo Lộ Trình (Bước {step}/4)</Text>
         <View style={{ width: 40 }} />

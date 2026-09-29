@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 
@@ -26,7 +27,7 @@ const TeamRosterScreen = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Image source={{ uri: 'https://img.icons8.com/material-outlined/24/3E2723/back.png' }} style={styles.icon} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Phòng chờ</Text>
         <View style={{ width: 40 }} />
@@ -39,7 +40,7 @@ const TeamRosterScreen = () => {
           <Text style={styles.codeLabel}>MÃ CHUYẾN ĐI</Text>
           <Text style={styles.codeText}>R2D-9X42</Text>
           <TouchableOpacity style={styles.shareButton}>
-            <Image source={{ uri: 'https://img.icons8.com/material-outlined/20/FFFFFF/share.png' }} style={styles.shareIcon} />
+            <Ionicons name="share-social" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
             <Text style={styles.shareButtonText}>Chia sẻ</Text>
           </TouchableOpacity>
         </View>
@@ -56,7 +57,7 @@ const TeamRosterScreen = () => {
           {checklist.map(item => (
             <TouchableOpacity key={item.id} style={styles.checkItem} onPress={() => toggleCheck(item.id)}>
               <View style={[styles.checkbox, item.checked && styles.checkboxActive]}>
-                {item.checked && <Image source={{ uri: 'https://img.icons8.com/ios-filled/16/FFFFFF/checkmark.png' }} style={styles.checkIcon} />}
+                {item.checked && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
               </View>
               <Text style={[styles.checkText, item.checked && styles.checkTextDone]}>{item.text}</Text>
             </TouchableOpacity>
@@ -86,7 +87,7 @@ const TeamRosterScreen = () => {
 
         {/* Group Chat Button */}
         <TouchableOpacity style={styles.chatButton}>
-          <Image source={{ uri: 'https://img.icons8.com/material-outlined/24/FFFFFF/speech-bubble.png' }} style={styles.chatIcon} />
+          <Ionicons name="chatbubbles" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
           <Text style={styles.chatBtnText}>Chat nhóm</Text>
         </TouchableOpacity>
 
