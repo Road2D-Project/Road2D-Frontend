@@ -41,3 +41,11 @@ example
 # generated native folders
 /ios
 /android
+
+# Internal docs & AI agent config
+.agent/
+.claude/
+ROADMAP_40_DAYS.md
+CODING_STANDARDS.md
+UI_GUIDELINES.md
+
