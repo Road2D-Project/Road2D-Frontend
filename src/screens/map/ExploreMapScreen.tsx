@@ -14,6 +14,7 @@ import {
 import MapView, { UrlTile, Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { ExploreMapScreenNavigationProp } from '../../types/navigation';
 import { colors } from '../../theme/colors';
 
 /**
@@ -107,7 +108,7 @@ const FILTERS = ['Gần tôi', 'Trending', 'Đã lưu', 'Đang có rider'];
 // ─── Screen ────────────────────────────────────────────────────────────────────
 
 const ExploreMapScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<ExploreMapScreenNavigationProp>();
   const [activeFilter, setActiveFilter] = useState('Gần tôi');
   const [selectedRoute, setSelectedRoute] = useState<RouteCard | null>(null);
 
@@ -208,7 +209,7 @@ const ExploreMapScreen = () => {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cardsScroll}>
                 <TouchableOpacity
                   style={styles.routeCard}
-                  onPress={() => navigation.navigate('TripDetails')}
+                  onPress={() => navigation.navigate('TripDetails', { tripId: selectedRoute.id })}
                 >
                   <Image source={{ uri: selectedRoute.image }} style={styles.cardImage} />
                   <View style={styles.cardInfo}>
@@ -257,7 +258,7 @@ const ExploreMapScreen = () => {
                     style={styles.routeCard}
                     onPress={() => {
                       setSelectedRoute(route);
-                      navigation.navigate('TripDetails');
+                      navigation.navigate('TripDetails', { tripId: route.id });
                     }}
                   >
                     <Image source={{ uri: route.image }} style={styles.cardImage} />

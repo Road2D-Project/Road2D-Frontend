@@ -63,6 +63,7 @@ export type TeamRosterScreenNavigationProp = NativeStackNavigationProp<RootStack
 export type LiveTrackingScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'LiveTracking'>;
 export type CreateRouteScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateRoute'>;
 export type AllUpcomingTripsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AllUpcomingTrips'>;
+export type ConversationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 
 // Tab screens — có thể navigate cả trong Tab lẫn trong Stack nên dùng CompositeNavigationProp
 export type HomeScreenNavigationProp = CompositeNavigationProp<

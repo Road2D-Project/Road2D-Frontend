@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Image, TextInput, ScrollView, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { CreateRouteScreenNavigationProp } from '../../types/navigation';
 import { colors } from '../../theme/colors';
 
 const CreateRouteScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<CreateRouteScreenNavigationProp>();
   const [step, setStep] = useState(1);
   const [coverImage, setCoverImage] = useState<string | null>(null);
 

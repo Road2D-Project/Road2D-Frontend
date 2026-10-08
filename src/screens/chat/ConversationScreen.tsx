@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
-import type { RootStackParamList } from '../../types/navigation';
+import type { RootStackParamList, ConversationScreenNavigationProp } from '../../types/navigation';
 
 type ConversationRouteProp = RouteProp<RootStackParamList, 'Conversation'>;
 
@@ -61,7 +61,7 @@ const THEM_AVATARS: Record<string, string> = {
 // ─── Screen ────────────────────────────────────────────────────────────────────
 
 const ConversationScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<ConversationScreenNavigationProp>();
   const route = useRoute<ConversationRouteProp>();
   const { chatId, chatName } = route.params;
   const scrollRef = useRef<ScrollView>(null);

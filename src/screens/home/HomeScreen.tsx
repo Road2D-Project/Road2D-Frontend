@@ -1,5 +1,6 @@
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { HomeScreenNavigationProp } from '../../types/navigation';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
@@ -38,7 +39,7 @@ const avatars = [
 ];
 
 const HomeScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<HomeScreenNavigationProp>();
   const [isFabMenuVisible, setIsFabMenuVisible] = useState(false);
   const animation = useRef(new Animated.Value(0)).current;
 
@@ -115,7 +116,7 @@ const HomeScreen = () => {
         <TouchableOpacity
           style={styles.activeCard}
           activeOpacity={0.9}
-          onPress={() => navigation.navigate('LiveTracking')}
+          onPress={() => navigation.navigate('LiveTracking', { tripId: 'active-trip' })}
         >
           <Image
             source={{ uri: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=800' }}
@@ -182,7 +183,7 @@ const HomeScreen = () => {
           <TouchableOpacity
             key={trip.id}
             style={styles.upcomingCard}
-            onPress={() => navigation.navigate('TripDetails')}
+            onPress={() => navigation.navigate('TripDetails', { tripId: trip.id })}
           >
             <Image
               source={{ uri: trip.image }}

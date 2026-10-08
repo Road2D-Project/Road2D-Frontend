@@ -6,13 +6,13 @@ import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../../theme/colors';
 import { useTripStore } from '../../store/useTripStore';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../types/navigation';
+import type { RootStackParamList, TeamRosterRouteProp } from '../../types/navigation';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'TeamRoster'>;
 
 const TeamRosterScreen = () => {
   const navigation = useNavigation<NavigationProp>();
-  const route = useRoute<any>();
+  const route = useRoute<TeamRosterRouteProp>();
   const tripId = route.params?.tripId;
   const trip = useTripStore((s) => s.trips.find(t => t.id === tripId));
   const updateTripStatus = useTripStore((s) => s.updateTripStatus);

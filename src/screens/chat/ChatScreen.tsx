@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { colors } from '../../theme/colors';
 import { useNavigation } from '@react-navigation/native';
+import type { ChatScreenNavigationProp } from '../../types/navigation';
 
 interface Chat {
   id: string;
@@ -63,7 +64,7 @@ const CHATS: Chat[] = [
 ];
 
 const ChatScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<ChatScreenNavigationProp>();
 
   const openConversation = (chat: Chat) => {
     navigation.navigate('Conversation', { chatId: chat.id, chatName: chat.name });

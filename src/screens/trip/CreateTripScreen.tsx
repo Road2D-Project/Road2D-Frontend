@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../types/navigation';
+import type { RootStackParamList, CreateTripScreenNavigationProp } from '../../types/navigation';
 import { useTripStore } from '../../store/useTripStore';
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ const stepStyles = StyleSheet.create({
 // ─── Main Screen ───────────────────────────────────────────────────────────────
 
 const CreateTripScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<CreateTripScreenNavigationProp>();
 
   // Navigation state
   const [step, setStep] = useState(0); // 0-3

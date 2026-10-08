@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { TripDetailsScreenNavigationProp } from '../../types/navigation';
 import { colors } from '../../theme/colors';
 
 const TIMELINE_DATA = [
@@ -13,7 +14,7 @@ const TIMELINE_DATA = [
 ];
 
 const TripDetailsScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<TripDetailsScreenNavigationProp>();
   const [activeTab, setActiveTab] = useState('Tổng quan');
   const [isSaved, setIsSaved] = useState(false);
 

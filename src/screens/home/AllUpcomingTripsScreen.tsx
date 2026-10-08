@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TextInput, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import type { AllUpcomingTripsScreenNavigationProp } from '../../types/navigation';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 const ALL_TRIPS = [
@@ -61,7 +62,7 @@ const avatars = [
 ];
 
 const AllUpcomingTripsScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<AllUpcomingTripsScreenNavigationProp>();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -87,7 +88,7 @@ const AllUpcomingTripsScreen = () => {
           <TouchableOpacity 
             key={trip.id} 
             style={styles.upcomingCard}
-            onPress={() => navigation.navigate('TripDetails')}
+            onPress={() => navigation.navigate('TripDetails', { tripId: trip.id })}
           >
             <Image 
               source={{ uri: trip.image }} 
