@@ -23,6 +23,7 @@ import {
   StatusBar,
   Alert,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -142,10 +143,13 @@ const CreateTripScreen = () => {
   const [startDate, setStartDate] = useState('05:00 — 24/12/2026');
   const [note, setNote] = useState('');
   const [isPublic, setIsPublic] = useState(true);
+  const [isRequireApproval, setIsRequireApproval] = useState(false);
   const [maxMembers, setMaxMembers] = useState('15');
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Step 3 state
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [searchFriend, setSearchFriend] = useState('');
 
   // Step 4 mock result
   const [createdInviteCode, setCreatedInviteCode] = useState('');
@@ -285,28 +289,50 @@ const CreateTripScreen = () => {
       <Text style={styles.fieldLabel}>Thời gian xuất phát</Text>
       <TouchableOpacity
         style={styles.inputBox}
-        onPress={() => Alert.alert('Chọn ngày', 'Date picker sẽ được tích hợp sau.')}
+        onPress={() => setShowDatePicker(true)}
       >
         <Text style={styles.inputBoxText}>{startDate}</Text>
         <Ionicons name="calendar-outline" size={18} color={C.sub} />
       </TouchableOpacity>
 
+      <Modal visible={showDatePicker} transparent animationType="slide">
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={{ backgroundColor: '#FFF', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 16, color: C.heading }}>Chọn thời gian xuất phát</Text>
+            {['05:00 — 24/12/2026', '06:00 — 25/12/2026', '07:30 — 01/01/2027', '08:00 — 15/01/2027'].map(d => (
+              <TouchableOpacity key={d} style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border }} onPress={() => { setStartDate(d); setShowDatePicker(false); }}>
+                <Text style={{ fontSize: 16, color: startDate === d ? C.primary : C.text, fontWeight: startDate === d ? 'bold' : 'normal' }}>{d}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={{ marginTop: 20, padding: 16, backgroundColor: C.primary, borderRadius: 14, alignItems: 'center' }} onPress={() => setShowDatePicker(false)}>
+              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>Xong</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Giới hạn thành viên */}
       <Text style={styles.fieldLabel}>Giới hạn thành viên</Text>
       <View style={styles.inputBox}>
+        <TouchableOpacity onPress={() => setMaxMembers(String(Math.max(1, parseInt(maxMembers || '1') - 1)))}>
+          <Ionicons name="remove-circle-outline" size={26} color={C.primary} />
+        </TouchableOpacity>
         <TextInput
-          style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0 }]}
+          style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0, textAlign: 'center', fontSize: 16, fontWeight: 'bold' }]}
           keyboardType="number-pad"
           value={maxMembers}
           onChangeText={setMaxMembers}
           placeholder="Tối đa"
           placeholderTextColor={C.border}
         />
-        <Text style={styles.inputBoxText}>người</Text>
+        <TouchableOpacity onPress={() => setMaxMembers(String(parseInt(maxMembers || '0') + 1))}>
+          <Ionicons name="add-circle-outline" size={26} color={C.primary} />
+        </TouchableOpacity>
+        <Text style={[styles.inputBoxText, { marginLeft: 12 }]}>người</Text>
       </View>
 
       {/* Ghi chú */}
-      <Text style={styles.fieldLabel}>Ghi chú cho thành viên</Text>
+      <Text style={styles.fieldLabel}>Giới thiệu</Text>
       <TextInput
         style={[styles.textInput, styles.textArea]}
         placeholder="Nhớ mang áo mưa. Góp quỹ 500k/người..."
@@ -318,13 +344,27 @@ const CreateTripScreen = () => {
 
       {/* Public / Private */}
       <View style={styles.switchRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.switchLabel}>Mở công khai</Text>
-          <Text style={styles.switchDesc}>Cho phép người khác tham gia bằng link</Text>
+        <View style={{ flex: 1, paddingRight: 16 }}>
+          <Text style={styles.switchLabel}>Hiển thị công khai</Text>
+          <Text style={styles.switchDesc}>Những người có thể thấy được nhóm của bạn ở trên cộng đồng</Text>
         </View>
         <Switch
           value={isPublic}
           onValueChange={setIsPublic}
+          trackColor={{ false: C.border, true: C.primary }}
+          thumbColor="#FFFFFF"
+        />
+      </View>
+
+      {/* Yêu cầu phê duyệt */}
+      <View style={[styles.switchRow, { marginTop: 16 }]}>
+        <View style={{ flex: 1, paddingRight: 16 }}>
+          <Text style={styles.switchLabel}>Yêu cầu phê duyệt</Text>
+          <Text style={styles.switchDesc}>Thành viên mới tham gia vào nhóm phải thông qua sự phê duyệt của trưởng nhóm</Text>
+        </View>
+        <Switch
+          value={isRequireApproval}
+          onValueChange={setIsRequireApproval}
           trackColor={{ false: C.border, true: C.primary }}
           thumbColor="#FFFFFF"
         />
@@ -342,6 +382,18 @@ const CreateTripScreen = () => {
         Chọn bạn từ danh sách để mời vào chuyến đi ngay.
         {'\n'}Bạn cũng có thể share link sau khi tạo xong.
       </Text>
+
+      {/* Thanh tìm kiếm */}
+      <View style={[styles.inputBox, { marginBottom: 16 }]}>
+        <Ionicons name="search-outline" size={20} color={C.sub} style={{ marginRight: 8 }} />
+        <TextInput
+          style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0 }]}
+          placeholder="Tìm kiếm bạn bè..."
+          placeholderTextColor={C.border}
+          value={searchFriend}
+          onChangeText={setSearchFriend}
+        />
+      </View>
 
       {selectedFriends.length > 0 && (
         <View style={styles.selectedChipsRow}>
@@ -362,7 +414,7 @@ const CreateTripScreen = () => {
         </View>
       )}
 
-      {MOCK_FRIENDS.map((friend) => {
+      {MOCK_FRIENDS.filter(f => f.name.toLowerCase().includes(searchFriend.toLowerCase())).map((friend) => {
         const selected = selectedFriends.includes(friend.id);
         return (
           <TouchableOpacity

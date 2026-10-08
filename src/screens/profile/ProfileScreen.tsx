@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuthStore } from '../../store/useAuthStore';
+import tokenStorage from '../../services/storage/tokenStorage';
 
 // ─── Brand colors — đồng bộ với HomeScreen ────────────────────────────────────
 const C = {
@@ -67,6 +69,11 @@ const MENU_ITEMS = [
 const ProfileScreen = () => {
   const [isFollowing, setIsFollowing] = useState(false);
   const xpPercent = (PROFILE.xp / PROFILE.xpNext) * 100;
+
+  const handleLogout = async () => {
+    await tokenStorage.clearTokens();
+    useAuthStore.getState().logout();
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -227,7 +234,7 @@ const ProfileScreen = () => {
               style={[styles.menuItem, { borderBottomWidth: 0 }]}
               onPress={() => Alert.alert('Đăng xuất', 'Bạn có chắc chắn muốn đăng xuất không?', [
                 { text: 'Huỷ', style: 'cancel' },
-                { text: 'Đăng xuất', style: 'destructive' },
+                { text: 'Đăng xuất', style: 'destructive', onPress: handleLogout },
               ])}
             >
               <View style={styles.menuItemLeft}>

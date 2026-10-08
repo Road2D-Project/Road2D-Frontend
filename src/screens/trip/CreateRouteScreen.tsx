@@ -2,160 +2,217 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Image, TextInput, ScrollView, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { WebView } from 'react-native-webview';
 import type { CreateRouteScreenNavigationProp } from '../../types/navigation';
 import { colors } from '../../theme/colors';
 
 const CreateRouteScreen = () => {
   const navigation = useNavigation<CreateRouteScreenNavigationProp>();
-  const [step, setStep] = useState(1);
-  const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [markers, setMarkers] = useState<any[]>([]);
+  const webviewRef = React.useRef<WebView>(null);
 
-  const renderStep1 = () => (
-    <View style={styles.stepContainer}>
-      <Image source={{ uri: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=800' }} style={styles.mapBg} />
-      <View style={styles.mapOverlay} />
-      <View style={styles.instructionBanner}>
-        <Text style={styles.instructionText}>Tap bản đồ để thêm điểm, giữ để di chuyển</Text>
-      </View>
-      <View style={[styles.mapMarker, { top: '40%', left: '30%' }]}>
-        <View style={styles.pin}>
-          <Text style={styles.pinText}>1</Text>
-        </View>
-      </View>
-      <View style={[styles.mapMarker, { top: '50%', left: '60%' }]}>
-        <View style={styles.pin}>
-          <Text style={styles.pinText}>2</Text>
-        </View>
-      </View>
-      <View style={styles.fakePolyline} />
-      
-      <View style={styles.bottomPanel}>
-        <Text style={styles.totalKmText}>Tổng quãng đường: <Text style={styles.kmHighlight}>45 km</Text></Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep(2)}>
-          <Text style={styles.primaryBtnText}>Tiếp theo →</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const goongMapKey = process.env.EXPO_PUBLIC_GOONG_MAP_KEY || '';
 
-  const renderStep2 = () => (
-    <ScrollView style={styles.stepContainer} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.sectionTitle}>Thông tin Tuyến đường</Text>
-      <TextInput style={styles.input} placeholder="Tên tuyến đường (VD: Hà Giang Loop)" placeholderTextColor="#999" />
-      
-      <TouchableOpacity 
-        style={styles.uploadBox}
-        onPress={() => setCoverImage('https://images.unsplash.com/photo-1599423423926-17b5db30303a?q=80&w=600')}
-      >
-        {coverImage ? (
-          <Image source={{ uri: coverImage }} style={styles.uploadedImg} />
-        ) : (
-          <>
-            <Ionicons name="camera-outline" size={40} color={colors.textSecondary} style={{ marginBottom: 8, opacity: 0.6 }} />
-            <Text style={styles.uploadText}>Tải ảnh bìa lên</Text>
-          </>
-        )}
-      </TouchableOpacity>
+  const handleMessage = (event: any) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'ADD_MARKER') {
+        setMarkers(prev => {
+          if (prev.length < 10) return [...prev, data.coordinate];
+          return prev;
+        });
+      }
+    } catch (e) {}
+  };
 
-      <TextInput 
-        style={[styles.input, styles.textArea]} 
-        placeholder="Mô tả chi tiết chuyến đi..." 
-        placeholderTextColor="#999"
-        multiline
-      />
+  const removeMarker = (index: number) => {
+    setMarkers(prev => prev.filter((_, i) => i !== index));
+    if (webviewRef.current) {
+      webviewRef.current.postMessage(JSON.stringify({ type: 'REMOVE_MARKER', index }));
+    }
+  };
+  
+  const clearAllMarkers = () => {
+    setMarkers([]);
+    if (webviewRef.current) {
+      webviewRef.current.postMessage(JSON.stringify({ type: 'CLEAR' }));
+    }
+  };
 
-      <Text style={styles.label}>Độ khó</Text>
-      <View style={styles.row}>
-        {['Dễ', 'Trung bình', 'Khó', 'Cực khó'].map(diff => (
-          <TouchableOpacity key={diff} style={styles.chip}>
-            <Text style={styles.chipText}>{diff}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <script src="https://cdn.jsdelivr.net/npm/@goongmaps/goong-js@1.0.9/dist/goong-js.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@goongmaps/goong-js@1.0.9/dist/goong-js.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        /* Ẩn logo goong nếu cần */
+        .goongjs-ctrl-logo { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        goongjs.accessToken = '${goongMapKey}';
+        var map = new goongjs.Map({
+            container: 'map',
+            style: 'https://tiles.goong.io/assets/goong_map_web.json',
+            center: [105.8542, 21.0285],
+            zoom: 12
+        });
 
-      <TouchableOpacity style={[styles.primaryBtn, { marginTop: 40 }]} onPress={() => setStep(3)}>
-        <Text style={styles.primaryBtnText}>Tiếp theo: Điểm dừng →</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
+        var mapMarkers = [];
 
-  const renderStep3 = () => (
-    <View style={styles.stepContainer}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.sectionTitle}>Các Điểm Dừng</Text>
+        function updateLine() {
+            var coords = mapMarkers.map(function(m) { return [m.getLngLat().lng, m.getLngLat().lat]; });
+            if (map.getSource('route')) {
+                map.getSource('route').setData({
+                    type: 'Feature',
+                    properties: {},
+                    geometry: { type: 'LineString', coordinates: coords }
+                });
+            } else if (coords.length > 1) {
+                map.addSource('route', {
+                    type: 'geojson',
+                    data: {
+                        type: 'Feature',
+                        properties: {},
+                        geometry: { type: 'LineString', coordinates: coords }
+                    }
+                });
+                map.addLayer({
+                    id: 'route',
+                    type: 'line',
+                    source: 'route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '${colors.primary}', 'line-width': 5 }
+                });
+            }
+        }
         
-        <View style={styles.stopCard}>
-          <View style={styles.stopHeader}>
-            <View style={styles.pinSmall}><Text style={styles.pinSmallText}>1</Text></View>
-            <Text style={styles.stopName}>Điểm Xuất Phát</Text>
-          </View>
-          <TextInput style={styles.stopInput} placeholder="Tên địa điểm..." />
-        </View>
+        map.on('click', function(e) {
+            if (mapMarkers.length < 10) {
+                var coord = e.lngLat;
+                var marker = new goongjs.Marker({ color: '${colors.primary}' })
+                    .setLngLat(coord)
+                    .addTo(map);
+                mapMarkers.push(marker);
+                updateLine();
+                
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'ADD_MARKER',
+                    coordinate: { latitude: coord.lat, longitude: coord.lng }
+                }));
+            }
+        });
 
-        <View style={styles.stopCard}>
-          <View style={styles.stopHeader}>
-            <View style={styles.pinSmall}><Text style={styles.pinSmallText}>2</Text></View>
-            <Text style={styles.stopName}>Điểm Đích</Text>
-          </View>
-          <TextInput style={styles.stopInput} placeholder="Tên địa điểm..." />
-        </View>
+        document.addEventListener('message', function(event) {
+            var msg = JSON.parse(event.data);
+            if (msg.type === 'CLEAR') {
+                mapMarkers.forEach(function(m) { m.remove(); });
+                mapMarkers = [];
+                updateLine();
+            } else if (msg.type === 'REMOVE_MARKER') {
+                var index = msg.index;
+                if (mapMarkers[index]) {
+                    mapMarkers[index].remove();
+                    mapMarkers.splice(index, 1);
+                    updateLine();
+                }
+            }
+        });
+        window.addEventListener('message', function(event) {
+            var msg = JSON.parse(event.data);
+            if (msg.type === 'CLEAR') {
+                mapMarkers.forEach(function(m) { m.remove(); });
+                mapMarkers = [];
+                updateLine();
+            } else if (msg.type === 'REMOVE_MARKER') {
+                var index = msg.index;
+                if (mapMarkers[index]) {
+                    mapMarkers[index].remove();
+                    mapMarkers.splice(index, 1);
+                    updateLine();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+  `;
 
-        <TouchableOpacity style={styles.addStopBtn}>
-          <Text style={styles.addStopText}>+ Thêm điểm dừng tự do</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.primaryBtn, { marginTop: 40 }]} onPress={() => setStep(4)}>
-          <Text style={styles.primaryBtnText}>Tiếp theo: Đăng tải →</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
-  );
-
-  const renderStep4 = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.scrollContent}>
-        <Text style={styles.sectionTitle}>Đăng tải lên Cộng Đồng</Text>
-        
-        <View style={styles.previewCard}>
-          {coverImage ? (
-            <Image source={{ uri: coverImage }} style={styles.previewCoverImg} />
-          ) : (
-            <View style={styles.previewCover} />
-          )}
-          <Text style={styles.previewTitle}>Tên tuyến đường</Text>
-          <Text style={styles.previewDesc}>45 km • Trung bình</Text>
-        </View>
-
-        <Text style={styles.label}>Quyền riêng tư</Text>
-        <View style={styles.row}>
-          {['Công khai', 'Chỉ bạn bè', 'Chỉ mình tôi'].map(priv => (
-            <TouchableOpacity key={priv} style={styles.chip}>
-              <Text style={styles.chipText}>{priv}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: '#4CAF50', marginTop: 40 }]} onPress={() => navigation.goBack()}>
-          <Text style={styles.primaryBtnText}>Publish Tuyến Đường</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const getMarkerLabel = (index: number) => {
+    if (index === 0) return "Điểm đầu";
+    if (index === markers.length - 1 && markers.length > 1) return "Điểm cuối";
+    return `Trạm dừng ${index}`;
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => step > 1 ? setStep(step - 1) : navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Tạo Lộ Trình (Bước {step}/4)</Text>
+        <Text style={styles.headerTitle}>Tạo Lộ Trình Mới</Text>
         <View style={{ width: 40 }} />
       </View>
       
-      {step === 1 && renderStep1()}
-      {step === 2 && renderStep2()}
-      {step === 3 && renderStep3()}
-      {step === 4 && renderStep4()}
+      <ScrollView style={styles.container} bounces={false}>
+        <View style={styles.mapContainer}>
+          <WebView
+            ref={webviewRef}
+            source={{ html: htmlContent }}
+            style={styles.mapBg}
+            onMessage={handleMessage}
+            scrollEnabled={false}
+          />
+          <View style={styles.instructionBanner} pointerEvents="none">
+            <Text style={styles.instructionText}>
+              {markers.length === 0 ? "Chạm bản đồ để chọn Điểm Đầu" :
+               markers.length === 1 ? "Chạm bản đồ để chọn Điểm Dừng hoặc Cuối" :
+               markers.length === 2 ? "Chạm bản đồ để chọn Điểm Cuối" : "Đã chọn xong lộ trình"}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.detailsContainer}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Các Điểm Đã Chọn</Text>
+            {markers.length > 0 && (
+              <TouchableOpacity onPress={clearAllMarkers}>
+                <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Xoá tất cả</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {markers.length === 0 && (
+            <Text style={{color: colors.textSecondary, fontStyle: 'italic', marginBottom: 20}}>Chưa có điểm nào được chọn.</Text>
+          )}
+          {markers.map((m, i) => (
+             <View key={i} style={[styles.stopCard, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+               <View style={styles.stopHeader}>
+                 <View style={styles.pinSmall}><Text style={styles.pinSmallText}>{i+1}</Text></View>
+                 <Text style={styles.stopName}>{getMarkerLabel(i)}</Text>
+               </View>
+               <TouchableOpacity onPress={() => removeMarker(i)}>
+                 <Ionicons name="trash-outline" size={22} color={colors.primary} />
+               </TouchableOpacity>
+             </View>
+          ))}
+
+          <TouchableOpacity 
+            style={[styles.primaryBtn, { marginTop: 20, opacity: markers.length >= 2 ? 1 : 0.5 }]} 
+            disabled={markers.length < 2}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.primaryBtnText}>Hoàn tất</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -182,10 +239,9 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18, fontWeight: 'bold', color: colors.textPrimary
   },
-  stepContainer: {
-    flex: 1,
-    position: 'relative'
-  },
+  container: { flex: 1 },
+  mapContainer: { width: '100%', height: 450, position: 'relative' },
+  detailsContainer: { padding: 20 },
   scrollContent: {
     padding: 20,
   },
@@ -259,9 +315,9 @@ const styles = StyleSheet.create({
   chipText: { color: colors.textPrimary, fontWeight: '500' },
   stopCard: {
     backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 16,
-    borderWidth: 1, borderColor: colors.border
+    borderWidth: 1, borderColor: colors.border, alignItems: 'center'
   },
-  stopHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  stopHeader: { flexDirection: 'row', alignItems: 'center' },
   pinSmall: {
     backgroundColor: colors.primary, width: 24, height: 24, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center', marginRight: 10
