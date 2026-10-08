@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import tripService from '../services/api/tripService';
 import type { CreateTripPayload, Trip } from '../types';
 
-interface TripState {
+export interface TripState {
   trips: Trip[];
   loading: boolean;
   error: string | null;

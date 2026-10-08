@@ -150,8 +150,8 @@ const CreateTripScreen = () => {
   // Step 4 mock result
   const [createdInviteCode, setCreatedInviteCode] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const currentTripId = useTripStore((s) => s.currentTripId);
-  const createTrip = useTripStore((s) => s.createTrip);
+  const currentTripId = useTripStore((s: any) => s.currentTripId);
+  const createTrip = useTripStore((s: any) => s.createTrip);
 
   // ── Navigation helpers ──
   const goNext = () => setStep((s) => Math.min(s + 1, 3));
