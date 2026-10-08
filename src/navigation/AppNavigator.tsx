@@ -11,7 +11,9 @@ import CreateRouteScreen from '../screens/trip/CreateRouteScreen';
 import AllUpcomingTripsScreen from '../screens/home/AllUpcomingTripsScreen';
 import ConversationScreen from '../screens/chat/ConversationScreen';
 import TabNavigator from './TabNavigator';
+import LoadingScreen from '../components/common/LoadingScreen';
 import type { RootStackParamList } from '../types/navigation';
+import { useAuthStore } from '../store/useAuthStore';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -37,32 +39,40 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  * - Thêm screen mới → khai báo kiểu trong RootStackParamList trước
  */
 const AppNavigator = () => {
+  const { isHydrated, isAuthenticated } = useAuthStore();
+
+  if (!isHydrated) {
+    return <LoadingScreen message="Đang khởi tạo..." />;
+  }
+
   return (
     <NavigationContainer>
-      <Stack.Navigator
-        initialRouteName="Login"
-        screenOptions={{ headerShown: false }}
-      >
-        {/* Auth */}
-        <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {!isAuthenticated ? (
+          // --- Chưa đăng nhập ---
+          <Stack.Screen name="Login" component={LoginScreen} />
+        ) : (
+          // --- Đã đăng nhập ---
+          <>
+            {/* Main (Tabs) */}
+            <Stack.Screen name="Home" component={TabNavigator} />
 
-        {/* Main (Tabs) */}
-        <Stack.Screen name="Home" component={TabNavigator} />
+            {/* Trip flow */}
+            <Stack.Screen name="TripDetails" component={TripDetailsScreen} />
+            <Stack.Screen name="CreateTrip" component={CreateTripScreen} />
+            <Stack.Screen name="TeamRoster" component={TeamRosterScreen} />
+            <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
 
-        {/* Trip flow */}
-        <Stack.Screen name="TripDetails" component={TripDetailsScreen} />
-        <Stack.Screen name="CreateTrip" component={CreateTripScreen} />
-        <Stack.Screen name="TeamRoster" component={TeamRosterScreen} />
-        <Stack.Screen name="LiveTracking" component={LiveTrackingScreen} />
+            {/* Route flow */}
+            <Stack.Screen name="CreateRoute" component={CreateRouteScreen} />
 
-        {/* Route flow */}
-        <Stack.Screen name="CreateRoute" component={CreateRouteScreen} />
+            {/* List screens */}
+            <Stack.Screen name="AllUpcomingTrips" component={AllUpcomingTripsScreen} />
 
-        {/* List screens */}
-        <Stack.Screen name="AllUpcomingTrips" component={AllUpcomingTripsScreen} />
-
-        {/* Chat */}
-        <Stack.Screen name="Conversation" component={ConversationScreen} />
+            {/* Chat */}
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

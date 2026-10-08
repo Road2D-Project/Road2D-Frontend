@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -23,11 +23,14 @@ import {
   type TrackingMember,
   type MemberStatus,
 } from '../../data/mockTrackingData';
+import { useSimulationStore } from '../../store/useSimulationStore';
+import { SimulationEngine } from '../../utils/SimulationEngine';
+import { useTripStore } from '../../store/useTripStore';
 
 // ------------------------------------------------------------------
 // Env keys — đọc từ EXPO_PUBLIC_ prefix
 // ------------------------------------------------------------------
-const GOONG_MAP_KEY = 'rTY0LiwU53Yz7zYISEAOMDktA1uD0CRQnkrcV4Mm';
+const GOONG_MAP_KEY = process.env.EXPO_PUBLIC_GOONG_MAP_KEY ?? '';
 
 // ------------------------------------------------------------------
 // Kích thước màn hình
@@ -256,10 +259,28 @@ function buildMapHTML(members: TrackingMember[]): string {
         }
       });
 
-      new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
+      const marker = new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
         .setLngLat(m.lngLat)
         .addTo(map);
+
+      window.memberMarkers = window.memberMarkers || {};
+      window.memberMarkers[m.id] = marker;
     });
+
+    const handleMessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'UPDATE_POSITION' && window.memberMarkers[data.id]) {
+          window.memberMarkers[data.id].setLngLat([data.lng, data.lat]);
+          if (data.isMe) {
+            map.flyTo({ center: [data.lng, data.lat], speed: 0.5 });
+          }
+        }
+      } catch(e) {}
+    };
+
+    window.addEventListener('message', handleMessage);
+    document.addEventListener('message', handleMessage);
   });
 </script>
 </body>
@@ -435,14 +456,46 @@ const LiveTrackingScreen = () => {
     } catch (_) { }
   }, []);
 
+  // --- Simulation logic ---
+  const engineRef = useRef<SimulationEngine | null>(null);
+  const webViewRef = useRef<WebView>(null);
+  const startSim = useSimulationStore(s => s.start);
+  const stopSim = useSimulationStore(s => s.stop);
+  const currentPosition = useSimulationStore(s => s.currentPosition);
+  const currentSpeed = useSimulationStore(s => s.currentSpeedKmh);
+  const traveledKm = useSimulationStore(s => s.traveledKm);
+
+  useEffect(() => {
+    engineRef.current = new SimulationEngine(MOCK_TRIP.routePolylineCoords as any);
+    startSim('mock_trip');
+    engineRef.current.start();
+    
+    return () => {
+      engineRef.current?.stop();
+      stopSim();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentPosition && webViewRef.current) {
+      webViewRef.current.postMessage(JSON.stringify({
+        type: 'UPDATE_POSITION',
+        id: 'u1',
+        lat: currentPosition.latitude,
+        lng: currentPosition.longitude,
+        isMe: true
+      }));
+    }
+  }, [currentPosition]);
+
   const trip = MOCK_TRIP;
   const normalCount = trip.members.filter((m) => m.status === 'normal').length;
   const alertCount = trip.members.length - normalCount;
 
   const mapHTML = buildMapHTML(trip.members);
 
-  // Tính % hoàn thành
-  const progressPct = Math.round((trip.completedDistance / trip.totalDistance) * 100);
+  const currentTraveled = traveledKm > 0 ? traveledKm : trip.completedDistance;
+  const progressPct = Math.min(100, Math.round((currentTraveled / trip.totalDistance) * 100));
 
   return (
     <View style={styles.container}>
@@ -563,8 +616,8 @@ const LiveTrackingScreen = () => {
             <View style={[styles.progressBarFill, { width: `${progressPct}%` as any }]} />
           </View>
           <View style={styles.progressLabels}>
-            <Text style={styles.progressText}>Đã đi: {trip.completedDistance} km</Text>
-            <Text style={styles.progressText}>Còn lại: {trip.totalDistance - trip.completedDistance} km</Text>
+            <Text style={styles.progressText}>Đã đi: {currentTraveled.toFixed(1)} km</Text>
+            <Text style={styles.progressText}>Còn lại: {Math.max(0, trip.totalDistance - currentTraveled).toFixed(1)} km</Text>
           </View>
         </View>
 

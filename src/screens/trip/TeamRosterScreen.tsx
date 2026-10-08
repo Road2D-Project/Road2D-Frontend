@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Share, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../../theme/colors';
+import { useTripStore } from '../../store/useTripStore';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../types/navigation';
 
-const MEMBERS = [
-  { id: '1', name: 'Nguyễn Văn A', role: 'Trưởng đoàn (Xế)', fund: 'Đã nộp', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=150' },
-  { id: '2', name: 'Trần Thị B', role: 'Thành viên (Ôm)', fund: 'Chưa nộp', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150' },
-  { id: '3', name: 'Lê Văn C', role: 'Thành viên (Xế)', fund: 'Đã nộp', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=150' },
-];
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'TeamRoster'>;
 
 const TeamRosterScreen = () => {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<any>();
+  const tripId = route.params?.tripId;
+  const trip = useTripStore((s) => s.trips.find(t => t.id === tripId));
+  const updateTripStatus = useTripStore((s) => s.updateTripStatus);
+
   const [checklist, setChecklist] = useState([
     { id: 1, text: 'Đổ đầy bình xăng', checked: true },
     { id: 2, text: 'Áo mưa bộ', checked: false },
@@ -21,6 +26,32 @@ const TeamRosterScreen = () => {
   const toggleCheck = (id: number) => {
     setChecklist(checklist.map(c => c.id === id ? { ...c, checked: !c.checked } : c));
   };
+
+  const handleShare = async () => {
+    if (!trip) return;
+    try {
+      await Share.share({
+        message: `Tham gia chuyến đi "${trip.name}" cùng mình trên R2D nhé! Mã mời: ${trip.inviteCode}\nLink: road2d://join/${trip.inviteCode}`,
+      });
+    } catch (error: any) {
+      Alert.alert('Lỗi', error.message);
+    }
+  };
+
+  const handleStartTrip = () => {
+    if (tripId) {
+      updateTripStatus(tripId, 'ACTIVE');
+      navigation.navigate('LiveTracking', { tripId });
+    }
+  };
+
+  if (!trip) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <Text style={{ textAlign: 'center', marginTop: 20 }}>Không tìm thấy thông tin chuyến đi.</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -38,18 +69,30 @@ const TeamRosterScreen = () => {
         {/* Code Display */}
         <View style={styles.codeContainer}>
           <Text style={styles.codeLabel}>MÃ CHUYẾN ĐI</Text>
-          <Text style={styles.codeText}>R2D-9X42</Text>
-          <TouchableOpacity style={styles.shareButton}>
+          <Text style={styles.codeText}>{trip.inviteCode}</Text>
+          
+          <View style={{ marginBottom: 24 }}>
+            <QRCode
+              value={`road2d://join/${trip.inviteCode}`}
+              size={120}
+              color={colors.textPrimary}
+              backgroundColor="#FFFFFF"
+            />
+          </View>
+
+          <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
             <Ionicons name="share-social" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
             <Text style={styles.shareButtonText}>Chia sẻ</Text>
           </TouchableOpacity>
         </View>
 
         {/* Group Note */}
-        <View style={styles.noteBox}>
-          <Text style={styles.noteTitle}>📌 Ghi chú từ Trưởng đoàn</Text>
-          <Text style={styles.noteText}>Nhớ mang áo mưa. Góp quỹ chung 500k/người. Xuất phát đúng 5h sáng.</Text>
-        </View>
+        {trip.note ? (
+          <View style={styles.noteBox}>
+            <Text style={styles.noteTitle}>📌 Ghi chú từ Trưởng đoàn</Text>
+            <Text style={styles.noteText}>{trip.note}</Text>
+          </View>
+        ) : null}
 
         {/* Checklist */}
         <View style={styles.checklistSection}>
@@ -67,19 +110,21 @@ const TeamRosterScreen = () => {
         {/* Member List */}
         <View style={styles.listHeader}>
           <Text style={styles.listTitle}>Danh sách đoàn</Text>
-          <Text style={styles.listCount}>3/15</Text>
+          <Text style={styles.listCount}>{trip.members?.length || 0}/{trip.maxMembers}</Text>
         </View>
 
-        {MEMBERS.map((member) => (
-          <View key={member.id} style={styles.memberCard}>
-            <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
+        {trip.members?.map((member) => (
+          <View key={member.userId} style={styles.memberCard}>
+            <Image source={{ uri: member.avatar || 'https://via.placeholder.com/150' }} style={styles.memberAvatar} />
             <View style={styles.memberInfo}>
               <Text style={styles.memberName}>{member.name}</Text>
-              <Text style={[styles.memberRole, member.role.includes('Trưởng đoàn') && styles.leaderRole]}>{member.role}</Text>
+              <Text style={[styles.memberRole, member.role === 'LEADER' && styles.leaderRole]}>
+                {member.role === 'LEADER' ? 'Trưởng đoàn' : (member.role === 'SWEEPER' ? 'Chốt đoàn' : 'Thành viên')}
+              </Text>
             </View>
             <View style={styles.fundStatus}>
-              <Text style={[styles.fundText, member.fund === 'Đã nộp' ? styles.fundDone : styles.fundPending]}>
-                {member.fund}
+              <Text style={[styles.fundText, member.accepted ? styles.fundDone : styles.fundPending]}>
+                {member.accepted ? 'Đã tham gia' : 'Chờ duyệt'}
               </Text>
             </View>
           </View>
@@ -98,7 +143,7 @@ const TeamRosterScreen = () => {
       <View style={styles.bottomBar}>
         <TouchableOpacity 
           style={styles.primaryButton}
-          onPress={() => navigation.navigate('LiveTracking')} // Bắt đầu -> Về trang Live Tracking
+          onPress={handleStartTrip}
         >
           <Text style={styles.primaryButtonText}>Chốt Đoàn - Bắt Đầu!</Text>
         </TouchableOpacity>

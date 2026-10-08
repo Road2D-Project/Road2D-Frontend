@@ -12,10 +12,7 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
   limit: number;
 }
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string;
-  createdAt: string;
-}
+// Domain types
+export * from './user';
+export * from './route';
+export * from './trip';

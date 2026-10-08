@@ -31,10 +31,10 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 export type RootStackParamList = {
   Login: undefined;
   Home: undefined;           // chứa TabNavigator bên trong
-  TripDetails: undefined;    // TODO Phase 3: thêm { tripId: string }
-  CreateTrip: undefined;     // TODO Phase 3: thêm { routeId?: string }
-  TeamRoster: undefined;     // TODO Phase 3: thêm { tripId: string }
-  LiveTracking: undefined;   // TODO Phase 3: thêm { tripId: string }
+  TripDetails: { tripId: string };
+  CreateTrip: { routeId?: string };
+  TeamRoster: { tripId: string };
+  LiveTracking: { tripId: string };
   CreateRoute: undefined;
   AllUpcomingTrips: undefined;
   Conversation: { chatId: string; chatName: string };

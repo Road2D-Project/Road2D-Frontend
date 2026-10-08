@@ -25,7 +25,7 @@ import { colors } from '../../theme/colors';
  * Goong dùng Mapbox-style vector tiles, không hỗ trợ trực tiếp UrlTile.
  * Thay vào đó dùng react-native-maps với provider=google hoặc default OpenStreetMap tile.
  */
-const GOONG_MAP_KEY = 'rTY0LiwU53Yz7zYISEAOMDktA1uD0CRQnkrcV4Mm';
+const GOONG_MAP_KEY = process.env.EXPO_PUBLIC_GOONG_MAP_KEY ?? '';
 const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 // Goong tile endpoint (raster tiles - fallback)

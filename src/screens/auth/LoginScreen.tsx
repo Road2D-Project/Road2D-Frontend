@@ -37,6 +37,9 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import authService from '../../services/api/authService';
 import tokenStorage from '../../services/storage/tokenStorage';
+import { useAuthStore } from '../../store/useAuthStore';
+import { MOCK_CURRENT_USER } from '../../mocks/mockData';
+import type { LoginScreenNavigationProp } from '../../types/navigation';
 
 type ScreenMode =
   | 'landing'
@@ -50,7 +53,7 @@ const GoogleGLogo = () => (
   <AntDesign name="google" size={20} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
 );
 
-const LoginScreen = ({ navigation }: any) => {
+const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) => {
   const [mode, setMode] = useState<ScreenMode>('landing');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -80,7 +83,12 @@ const LoginScreen = ({ navigation }: any) => {
 
   const saveAndNavigate = async (accessToken: string, refreshToken: string) => {
     await tokenStorage.saveTokens(accessToken, refreshToken);
-    navigation.navigate('Home');
+    // TODO BACKEND: thay MOCK_CURRENT_USER bằng `await authService.getMe()` map sang User
+    useAuthStore.getState().login({
+      ...MOCK_CURRENT_USER,
+      phone: phone.replace(/\s/g, '') || MOCK_CURRENT_USER.phone,
+    });
+    // AuthGuard trong AppNavigator sẽ tự động đổi sang màn Home khi isAuthenticated = true
   };
 
   const startCountdown = (seconds = 60) => {

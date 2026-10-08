@@ -22,10 +22,14 @@ import {
   Platform,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../types/navigation';
+import { useTripStore } from '../../store/useTripStore';
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -144,8 +148,10 @@ const CreateTripScreen = () => {
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
 
   // Step 4 mock result
-  const MOCK_INVITE_CODE = 'R2D-7F3K9';
-  const MOCK_TRIP_ID = 'trip_abc123';
+  const [createdInviteCode, setCreatedInviteCode] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const currentTripId = useTripStore((s) => s.currentTripId);
+  const createTrip = useTripStore((s) => s.createTrip);
 
   // ── Navigation helpers ──
   const goNext = () => setStep((s) => Math.min(s + 1, 3));
@@ -160,9 +166,31 @@ const CreateTripScreen = () => {
     );
   };
 
-  const handleCreate = () => {
-    // Mock tạo trip
-    setStep(3);
+  const handleCreate = async () => {
+    if (!selectedRoute) return;
+    setIsCreating(true);
+    try {
+      const payload = {
+        name: tripName || selectedRoute.name,
+        routeId: selectedRoute.id,
+        routeName: selectedRoute.name,
+        distanceKm: parseInt(selectedRoute.distance) || 0,
+        startAt: new Date().toISOString(), // Dùng tạm Date.now() cho mock
+        vehicle: vehicle as any,
+        maxMembers: parseInt(maxMembers) || 15,
+        isPublic,
+        note,
+        invitedUserIds: selectedFriends,
+        coverImage: selectedRoute.image,
+      };
+      const trip = await createTrip(payload);
+      setCreatedInviteCode(trip.inviteCode);
+      setStep(3);
+    } catch (e) {
+      Alert.alert('Lỗi', 'Không thể tạo chuyến đi.');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   // ── STEP LABELS ──
@@ -378,10 +406,10 @@ const CreateTripScreen = () => {
         {/* Invite code */}
         <View style={styles.inviteCard}>
           <Text style={styles.inviteCardLabel}>MÃ MỜI</Text>
-          <Text style={styles.inviteCode}>{MOCK_INVITE_CODE}</Text>
+          <Text style={styles.inviteCode}>{createdInviteCode || 'R2D-7F3K9'}</Text>
           <TouchableOpacity
             style={styles.copyBtn}
-            onPress={() => Alert.alert('Đã sao chép!', `Mã ${MOCK_INVITE_CODE} đã được sao chép.`)}
+            onPress={() => Alert.alert('Đã sao chép!', `Mã ${createdInviteCode} đã được sao chép.`)}
           >
             <Feather name="copy" size={16} color={C.primary} />
             <Text style={styles.copyBtnText}>Sao chép mã</Text>
@@ -390,7 +418,7 @@ const CreateTripScreen = () => {
 
         {/* Share link */}
         <View style={styles.shareRow}>
-          <TouchableOpacity style={styles.shareBtn} onPress={() => Alert.alert('Chia sẻ link', 'https://road2d.app/join/' + MOCK_INVITE_CODE)}>
+          <TouchableOpacity style={styles.shareBtn} onPress={() => Alert.alert('Chia sẻ link', 'https://road2d.app/join/' + createdInviteCode)}>
             <Feather name="share-2" size={18} color="#FFF" />
             <Text style={styles.shareBtnText}>Chia sẻ link</Text>
           </TouchableOpacity>
@@ -422,7 +450,13 @@ const CreateTripScreen = () => {
         {/* Go to team roster */}
         <TouchableOpacity
           style={styles.rosterBtn}
-          onPress={() => navigation.navigate('TeamRoster')}
+          onPress={() => {
+            if (currentTripId) {
+              navigation.navigate('TeamRoster', { tripId: currentTripId });
+            } else {
+              navigation.navigate('Home');
+            }
+          }}
         >
           <Text style={styles.rosterBtnText}>Xem danh sách thành viên</Text>
           <Feather name="arrow-right" size={16} color={C.primary} />
@@ -447,12 +481,15 @@ const CreateTripScreen = () => {
       Alert.alert('Thiếu tên', 'Vui lòng nhập tên chuyến đi.');
       return;
     }
-    if (step === 2) { handleCreate(); return; }
+    if (step === 2) { 
+      if (!isCreating) handleCreate(); 
+      return; 
+    }
     if (step === 3) { navigation.navigate('Home'); return; }
     goNext();
   };
 
-  const ctaDisabled = step === 0 && !selectedRoute;
+  const ctaDisabled = (step === 0 && !selectedRoute) || isCreating;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -490,13 +527,19 @@ const CreateTripScreen = () => {
           onPress={handleCta}
           activeOpacity={ctaDisabled ? 1 : 0.85}
         >
-          {step === 3
-            ? <Ionicons name="home-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
-            : step === 2
-              ? <Ionicons name="paper-plane-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
-              : null
-          }
-          <Text style={styles.ctaBtnText}>{getCtaLabel()}</Text>
+          {isCreating ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <>
+              {step === 3
+                ? <Ionicons name="home-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
+                : step === 2
+                  ? <Ionicons name="paper-plane-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
+                  : null
+              }
+              <Text style={styles.ctaBtnText}>{getCtaLabel()}</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>

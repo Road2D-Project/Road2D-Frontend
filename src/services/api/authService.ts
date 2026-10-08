@@ -10,6 +10,9 @@
  */
 
 import apiClient from './index';
+import { USE_MOCK } from '../../config/env';
+import { MOCK_CURRENT_USER } from '../../mocks/mockData';
+import { delay } from '../../mocks/mockStore';
 
 // ─── Request / Response types ────────────────────────────────────────────────
 
@@ -54,6 +57,15 @@ const authService = {
    * POST /auth/user/login
    */
   login: async (payload: LoginRequest): Promise<LoginResponse> => {
+    if (USE_MOCK) {
+      // MOCK: tài khoản nào cũng vào được, miễn mật khẩu >= 6 ký tự
+      await delay(800);
+      if (payload.password.length < 6) {
+        throw { response: { status: 400, data: { message: 'Sai tên đăng nhập hoặc mật khẩu.' } } };
+      }
+      return { data: { access_token: 'mock_access_token', refresh_token: 'mock_refresh_token' } };
+    }
+    // TODO BACKEND: POST /auth/user/login
     const response = await apiClient.post<LoginResponse>('/auth/user/login', payload);
     return response.data;
   },
@@ -63,6 +75,16 @@ const authService = {
    * GET /auth/user/me  (Bearer token đính tự động qua interceptor)
    */
   getMe: async (): Promise<UserProfile> => {
+    if (USE_MOCK) {
+      await delay(300);
+      return {
+        id: MOCK_CURRENT_USER.id,
+        username: MOCK_CURRENT_USER.username ?? 'ban.r2d',
+        email: 'ban@road2d.app',
+        created_at: new Date().toISOString(),
+      };
+    }
+    // TODO BACKEND: GET /auth/user/me
     const response = await apiClient.get<UserProfile>('/auth/user/me');
     return response.data;
   },
@@ -72,6 +94,8 @@ const authService = {
    * POST /auth/user/logout
    */
   logout: async (refreshToken: string): Promise<void> => {
+    if (USE_MOCK) return;
+    // TODO BACKEND: POST /auth/user/logout
     await apiClient.post('/auth/user/logout', { refresh_token: refreshToken });
   },
 
@@ -80,6 +104,8 @@ const authService = {
    * POST /auth/user/refresh
    */
   refreshToken: async (refreshToken: string): Promise<{ access_token: string }> => {
+    if (USE_MOCK) return { access_token: 'mock_access_token' };
+    // TODO BACKEND: POST /auth/user/refresh
     const response = await apiClient.post<{ access_token: string }>('/auth/user/refresh', {
       refresh_token: refreshToken,
     });
