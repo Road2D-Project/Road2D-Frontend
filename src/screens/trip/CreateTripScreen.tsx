@@ -53,41 +53,50 @@ const MOCK_ROUTES = [
     name: 'Hà Giang Loop',
     distance: '350 km',
     stops: 6,
-    image: 'https://images.unsplash.com/photo-1599423423926-17b5db30303a?q=80&w=400',
+    // Ảnh từ Picsum (stable, không cần referral)
+    image: 'https://picsum.photos/seed/hagiang/600/300',
   },
   {
     id: 'r2',
     name: 'Tà Xùa Săn Mây',
     distance: '285 km',
     stops: 4,
-    image: 'https://images.unsplash.com/photo-1596704153831-fbf22d4f58c7?q=80&w=400',
+    image: 'https://picsum.photos/seed/taxua/600/300',
   },
   {
     id: 'r3',
     name: 'Trảng Bom — Đà Lạt',
     distance: '300 km',
     stops: 5,
-    image: 'https://images.unsplash.com/photo-1519098901909-b1553a1190af?q=80&w=400',
+    image: 'https://picsum.photos/seed/dalat/600/300',
   },
   {
     id: 'r4',
     name: 'Cung Đường Tây Bắc',
     distance: '850 km',
     stops: 10,
-    image: 'https://images.unsplash.com/photo-1549880181-56a44cf4a9a5?q=80&w=400',
+    image: 'https://picsum.photos/seed/taybac/600/300',
   },
 ];
 
 const MOCK_FRIENDS = [
-  { id: 'f1', name: 'Tuấn Đạt', username: '@tuan.dat', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=100' },
-  { id: 'f2', name: 'Thu Hà', username: '@thu.ha', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=100' },
-  { id: 'f3', name: 'Minh Trang', username: '@minh.trang', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?q=80&w=100' },
-  { id: 'f4', name: 'Hoài Nam', username: '@hoai.nam', avatar: 'https://images.unsplash.com/photo-1543610892-0b1f7e6d8ac1?q=80&w=100' },
-  { id: 'f5', name: 'Thanh Trúc', username: '@thanh.truc', avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?q=80&w=100' },
-  { id: 'f6', name: 'Bảo Long', username: '@bao.long', avatar: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?q=80&w=100' },
+  { id: 'f1', name: 'Tuấn Đạt', username: '@tuan.dat', avatar: 'https://picsum.photos/seed/user1/100/100' },
+  { id: 'f2', name: 'Thu Hà', username: '@thu.ha', avatar: 'https://picsum.photos/seed/user2/100/100' },
+  { id: 'f3', name: 'Minh Trang', username: '@minh.trang', avatar: 'https://picsum.photos/seed/user3/100/100' },
+  { id: 'f4', name: 'Hoài Nam', username: '@hoai.nam', avatar: 'https://picsum.photos/seed/user4/100/100' },
+  { id: 'f5', name: 'Thanh Trúc', username: '@thanh.truc', avatar: 'https://picsum.photos/seed/user5/100/100' },
+  { id: 'f6', name: 'Bảo Long', username: '@bao.long', avatar: 'https://picsum.photos/seed/user6/100/100' },
 ];
 
 const VEHICLES = ['Xe đạp', 'Xe máy', 'Ô tô'] as const;
+
+// Trip type — backend dùng để tính member limit
+const TRIP_TYPES = [
+  { key: 'bronze', label: 'Bronze', desc: 'Tối đa 15 người', icon: '🥉' },
+  { key: 'silver', label: 'Silver', desc: 'Tối đa 30 người', icon: '🥈' },
+  { key: 'gold',   label: 'Gold',   desc: 'Tối đa 50 người', icon: '🥇' },
+] as const;
+type TripTypeKey = typeof TRIP_TYPES[number]['key'];
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -137,7 +146,7 @@ const CreateTripScreen = () => {
   // Step 1 state
   const [selectedRoute, setSelectedRoute] = useState<typeof MOCK_ROUTES[0] | null>(null);
 
-  // Step 2 state
+  // Step 1 state
   const [tripName, setTripName] = useState('');
   const [vehicle, setVehicle] = useState<typeof VEHICLES[number]>('Xe máy');
   const [startDate, setStartDate] = useState('05:00 — 24/12/2026');
@@ -146,16 +155,18 @@ const CreateTripScreen = () => {
   const [isRequireApproval, setIsRequireApproval] = useState(false);
   const [maxMembers, setMaxMembers] = useState('15');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [tripType, setTripType] = useState<TripTypeKey>('bronze');
 
-  // Step 3 state
+  // Step 2 state
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [searchFriend, setSearchFriend] = useState('');
 
-  // Step 4 mock result
+  // Step 3 result
   const [createdInviteCode, setCreatedInviteCode] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const currentTripId = useTripStore((s: any) => s.currentTripId);
   const createTrip = useTripStore((s: any) => s.createTrip);
+  const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 
   // ── Navigation helpers ──
   const goNext = () => setStep((s) => Math.min(s + 1, 3));
@@ -179,8 +190,9 @@ const CreateTripScreen = () => {
         routeId: selectedRoute.id,
         routeName: selectedRoute.name,
         distanceKm: parseInt(selectedRoute.distance) || 0,
-        startAt: new Date().toISOString(), // Dùng tạm Date.now() cho mock
+        startAt: new Date().toISOString(),
         vehicle: vehicle as any,
+        tripType,
         maxMembers: parseInt(maxMembers) || 15,
         isPublic,
         note,
@@ -188,7 +200,25 @@ const CreateTripScreen = () => {
         coverImage: selectedRoute.image,
       };
       const trip = await createTrip(payload);
-      setCreatedInviteCode(trip.inviteCode);
+
+      // Sau khi tạo trip, xin invite link từ backend (nếu có tripId thật)
+      let inviteCode = (trip as any).inviteCode ?? '';
+      if (!inviteCode && trip?.id && API_URL) {
+        try {
+          const linkRes = await fetch(`${API_URL}/trips/${trip.id}/invite-link`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (linkRes.ok) {
+            const linkData = await linkRes.json();
+            inviteCode = linkData.token ?? '';
+          }
+        } catch { /* backend chưa sẵn sàng, dùng mock */ }
+      }
+      // Fallback mock code nếu chưa có
+      if (!inviteCode) inviteCode = 'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+
+      setCreatedInviteCode(inviteCode);
       setStep(3);
     } catch (e) {
       Alert.alert('Lỗi', 'Không thể tạo chuyến đi.');
@@ -311,24 +341,24 @@ const CreateTripScreen = () => {
         </View>
       </Modal>
 
-      {/* Giới hạn thành viên */}
-      <Text style={styles.fieldLabel}>Giới hạn thành viên</Text>
-      <View style={styles.inputBox}>
-        <TouchableOpacity onPress={() => setMaxMembers(String(Math.max(1, parseInt(maxMembers || '1') - 1)))}>
-          <Ionicons name="remove-circle-outline" size={26} color={C.primary} />
-        </TouchableOpacity>
-        <TextInput
-          style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0, textAlign: 'center', fontSize: 16, fontWeight: 'bold' }]}
-          keyboardType="number-pad"
-          value={maxMembers}
-          onChangeText={setMaxMembers}
-          placeholder="Tối đa"
-          placeholderTextColor={C.border}
-        />
-        <TouchableOpacity onPress={() => setMaxMembers(String(parseInt(maxMembers || '0') + 1))}>
-          <Ionicons name="add-circle-outline" size={26} color={C.primary} />
-        </TouchableOpacity>
-        <Text style={[styles.inputBoxText, { marginLeft: 12 }]}>người</Text>
+      {/* Loại trip (tripType — backend dùng để xác định giới hạn thành viên) */}
+      <Text style={styles.fieldLabel}>Loại chuyến đi</Text>
+      <View style={styles.tripTypeRow}>
+        {TRIP_TYPES.map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            style={[styles.tripTypeBtn, tripType === t.key && styles.tripTypeBtnActive]}
+            onPress={() => setTripType(t.key)}
+          >
+            <Text style={styles.tripTypeIcon}>{t.icon}</Text>
+            <Text style={[styles.tripTypeLabel, tripType === t.key && styles.tripTypeLabelActive]}>
+              {t.label}
+            </Text>
+            <Text style={[styles.tripTypeDesc, tripType === t.key && { color: '#FFF' }]}>
+              {t.desc}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Ghi chú */}
@@ -776,6 +806,20 @@ const styles = StyleSheet.create({
   vehicleBtnActive: { backgroundColor: C.primary, borderColor: C.primary },
   vehicleBtnText: { fontSize: 13, fontWeight: '600', color: C.sub },
   vehicleBtnTextActive: { color: '#FFF' },
+
+  // Trip type
+  tripTypeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  tripTypeBtn: {
+    flex: 1, alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: 14, borderWidth: 1.5, borderColor: C.border,
+    paddingVertical: 12, paddingHorizontal: 6,
+  },
+  tripTypeBtnActive: { backgroundColor: C.primary, borderColor: C.primary },
+  tripTypeIcon: { fontSize: 22, marginBottom: 4 },
+  tripTypeLabel: { fontSize: 13, fontWeight: '700', color: C.text, marginBottom: 2 },
+  tripTypeLabelActive: { color: '#FFF' },
+  tripTypeDesc: { fontSize: 10, color: C.sub, textAlign: 'center' },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
