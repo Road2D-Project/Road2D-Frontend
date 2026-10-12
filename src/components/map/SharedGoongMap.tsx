@@ -81,19 +81,47 @@ function buildMapHTML({
   const routeGeoJSON = JSON.stringify(routeCoords);
   const hasRoute = routeCoords.length >= 2;
 
-  // Render Waypoint markers
+  // Render Waypoint markers với tone màu nâu chủ đạo của Road2D và tag nhãn ở phía trên
   const waypointsJS = waypoints.map((wp, i) => {
     const isFirst = wp.type === 'start' || i === 0;
     const isLast = wp.type === 'end' || (i === waypoints.length - 1 && waypoints.length > 1);
-    const color = isFirst ? '#4CAF50' : isLast ? '#FF5252' : '#CD853F';
-    const label = wp.label ?? (isFirst ? 'A' : isLast ? 'B' : String(i));
+    
+    // Tag nhãn phía trên marker
+    const tagText = wp.label ?? (isFirst ? 'Điểm xuất phát' : isLast ? 'Điểm đến' : `Trạm ${i}`);
+    
+    // Tone màu nâu chủ đạo Road2D (màu button + trang chủ: #CD8554)
+    const pinColor = isFirst ? '#CD8554' : isLast ? '#A85A32' : '#8D6E63';
+    
+    // Icon SVG bên trong pin (thay thế cho chữ A, B cũ)
+    const iconSVG = isFirst
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle></svg>'
+      : isLast
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>'
+      : `<span style="color:#FFF;font-size:11px;font-weight:700;">${i}</span>`;
 
     return `
       (function() {
-        var el = document.createElement('div');
-        el.style.cssText = 'width:28px;height:28px;border-radius:50%;background:${color};border:2.5px solid #FFFFFF;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:11px;color:#FFFFFF;box-shadow:0 3px 8px rgba(0,0,0,0.5);cursor:pointer;';
-        el.textContent = '${label}';
-        new maplibregl.Marker({ element: el })
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;pointer-events:auto;user-select:none;';
+
+        // Tag nhãn ở trên: "Điểm xuất phát", "Điểm đến"
+        var tag = document.createElement('div');
+        tag.style.cssText = 'background:#FFFFFF;color:#5D3A29;font-weight:700;font-size:11px;padding:3px 9px;border-radius:12px;border:1.5px solid ${pinColor};box-shadow:0 3px 8px rgba(0,0,0,0.25);white-space:nowrap;margin-bottom:3px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;letter-spacing:0.2px;';
+        tag.textContent = '${tagText}';
+        wrap.appendChild(tag);
+
+        // Marker pin hình giọt nước xoay -45 độ màu nâu chủ đạo
+        var pin = document.createElement('div');
+        pin.style.cssText = 'width:28px;height:28px;border-radius:50% 50% 50% 0;background:${pinColor};transform:rotate(-45deg);border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.35);';
+
+        var inner = document.createElement('div');
+        inner.style.cssText = 'transform:rotate(45deg);display:flex;align-items:center;justify-content:center;';
+        inner.innerHTML = '${iconSVG}';
+        pin.appendChild(inner);
+
+        wrap.appendChild(pin);
+
+        new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
           .setLngLat([${wp.lng}, ${wp.lat}])
           .addTo(map);
       })();

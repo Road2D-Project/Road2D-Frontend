@@ -215,7 +215,7 @@ const HomeScreen = () => {
                   />
                 ))}
                 <View style={[styles.moreAvatar, { marginLeft: -10, width: 28, height: 28, borderRadius: 14, borderColor: '#444' }]}>
-                  <Text style={[styles.moreAvatarText, { fontSize: 10 }]}>+4</Text>
+                  <Text style={[styles.moreAvatarText, { fontSize: 11.5 }]}>+4</Text>
                 </View>
               </View>
 

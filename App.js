@@ -1,8 +1,10 @@
 import 'react-native-gesture-handler';
+import './src/theme/fontScaler';
 import React, { useEffect, useState } from 'react';
 import * as Font from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { Ionicons } from '@expo/vector-icons';
+import { View } from 'react-native';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ErrorBoundary } from './src/components/common/ErrorBoundary';
 
@@ -40,7 +42,9 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <AppNavigator />
+      <View style={{ flex: 1, paddingBottom: 4, backgroundColor: '#FDFBF7' }}>
+        <AppNavigator />
+      </View>
     </ErrorBoundary>
   );
 }

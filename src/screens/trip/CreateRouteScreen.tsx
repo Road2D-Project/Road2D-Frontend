@@ -10,7 +10,7 @@
  *   - Gọi API qua backend proxy với X-Playground-Key để bảo vệ an toàn GOONG_REST_KEY.
  */
 
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,9 @@ import {
   StatusBar,
   Keyboard,
   KeyboardAvoidingView,
+  Animated,
+  Dimensions,
+  Easing,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
@@ -36,6 +39,12 @@ import {
   PlaceDetail,
   RouteLegResult,
 } from '../../services/api/goongMapService';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Chiều cao map khi bàn phím đóng: vừa vặn để hiện đủ cả 2 ô Xuất phát & Điểm đến mà không cần cuộn
+const NORMAL_MAP_HEIGHT = Math.min(Math.max(Math.round(SCREEN_HEIGHT * 0.38), 240), 315);
+// Chiều cao map khi bàn phím mở: co lại 140px để panel trồi lên trên bàn phím
+const KEYBOARD_MAP_HEIGHT = 140;
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -110,6 +119,13 @@ const SearchBox: React.FC<SearchBoxProps> = ({
     onSelect(detail);
   };
 
+  const handleClear = () => {
+    setQuery('');
+    setPredictions([]);
+    setFocused(false);
+    onClear();
+  };
+
   if (value) {
     return (
       <View style={sb.selectedRow}>
@@ -123,17 +139,19 @@ const SearchBox: React.FC<SearchBoxProps> = ({
           </Text>
         </View>
         <TouchableOpacity
-          onPress={onClear}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={sb.clearBtn}
+          onPress={handleClear}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          activeOpacity={0.7}
         >
-          <Ionicons name="close-circle" size={20} color={C.border} />
+          <Ionicons name="close" size={16} color={C.heading} />
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View>
+    <View style={{ width: '100%' }}>
       <View style={[sb.inputRow, focused && sb.inputRowFocused]}>
         <View style={[sb.dot, { backgroundColor: dotColor }]} />
         <TextInput
@@ -142,6 +160,8 @@ const SearchBox: React.FC<SearchBoxProps> = ({
           onChangeText={handleChange}
           placeholder={placeholder}
           placeholderTextColor={C.border}
+          multiline={false}
+          numberOfLines={1}
           onFocus={() => {
             setFocused(true);
             onFocus?.();
@@ -155,10 +175,12 @@ const SearchBox: React.FC<SearchBoxProps> = ({
           <ActivityIndicator size="small" color={C.primary} style={{ marginLeft: 6 }} />
         ) : query.length > 0 ? (
           <TouchableOpacity
+            style={sb.inputClearBtn}
             onPress={() => {
               setQuery('');
               setPredictions([]);
             }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons name="close" size={16} color={C.sub} />
           </TouchableOpacity>
@@ -168,29 +190,35 @@ const SearchBox: React.FC<SearchBoxProps> = ({
       {/* Dropdown gợi ý render bên dưới input */}
       {predictions.length > 0 && (
         <View style={sb.dropdown}>
-          {predictions.map((p) => (
-            <TouchableOpacity
-              key={p.place_id}
-              style={sb.predItem}
-              onPress={() => handleSelect(p)}
-            >
-              <Ionicons
-                name="location-outline"
-                size={15}
-                color={C.primary}
-                style={{ flexShrink: 0, marginRight: 8 }}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={sb.predName} numberOfLines={1}>
-                  {p.structured_formatting?.main_text ?? p.description.split(',')[0]}
-                </Text>
-                <Text style={sb.predAddr} numberOfLines={1}>
-                  {p.structured_formatting?.secondary_text ??
-                    p.description.split(',').slice(1).join(',').trim()}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          <ScrollView
+            style={{ maxHeight: 200 }}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {predictions.map((p) => (
+              <TouchableOpacity
+                key={p.place_id}
+                style={sb.predItem}
+                onPress={() => handleSelect(p)}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={15}
+                  color={C.primary}
+                  style={{ flexShrink: 0, marginRight: 8 }}
+                />
+                <View style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                  <Text style={sb.predName} numberOfLines={1} ellipsizeMode="tail">
+                    {p.structured_formatting?.main_text ?? p.description.split(',')[0]}
+                  </Text>
+                  <Text style={sb.predAddr} numberOfLines={1} ellipsizeMode="tail">
+                    {p.structured_formatting?.secondary_text ??
+                      p.description.split(',').slice(1).join(',').trim()}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
       )}
     </View>
@@ -206,8 +234,9 @@ const sb = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    minHeight: 46,
     marginBottom: 6,
+    overflow: 'hidden',
   },
   inputRowFocused: {
     borderColor: C.primary,
@@ -224,8 +253,18 @@ const sb = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: C.text,
-    padding: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    height: 44,
+    textAlignVertical: 'center',
     minWidth: 0,
+  },
+  inputClearBtn: {
+    padding: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+    flexShrink: 0,
   },
   selectedRow: {
     flexDirection: 'row',
@@ -235,23 +274,38 @@ const sb = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: C.primary,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    minHeight: 52,
     marginBottom: 6,
+    overflow: 'hidden',
   },
   selectedText: {
     flex: 1,
+    flexShrink: 1,
     marginRight: 8,
     minWidth: 0,
+    overflow: 'hidden',
+  },
+  clearBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#EAE1D7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   selectedName: {
     fontSize: 14,
     fontWeight: '700',
     color: C.heading,
+    flexShrink: 1,
   },
   selectedAddr: {
     fontSize: 11,
     color: C.sub,
     marginTop: 1,
+    flexShrink: 1,
   },
   dropdown: {
     backgroundColor: '#FFFFFF',
@@ -273,16 +327,19 @@ const sb = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#F5EFE9',
+    overflow: 'hidden',
   },
   predName: {
     fontSize: 13,
     fontWeight: '600',
     color: C.heading,
+    flexShrink: 1,
   },
   predAddr: {
     fontSize: 11,
     color: C.sub,
     marginTop: 1,
+    flexShrink: 1,
   },
 });
 
@@ -296,6 +353,38 @@ export const CreateRouteScreen: React.FC = () => {
   const [origin, setOrigin] = useState<Waypoint | null>(null);
   const [destination, setDestination] = useState<Waypoint | null>(null);
   const [stops, setStops] = useState<Waypoint[]>([]);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const mapHeightAnim = useRef(new Animated.Value(NORMAL_MAP_HEIGHT)).current;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+      Animated.timing(mapHeightAnim, {
+        toValue: KEYBOARD_MAP_HEIGHT,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      Animated.timing(mapHeightAnim, {
+        toValue: NORMAL_MAP_HEIGHT,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Stop search state
   const [stopQuery, setStopQuery] = useState('');
@@ -325,7 +414,7 @@ export const CreateRouteScreen: React.FC = () => {
         name: wp.name,
         lat: wp.lat,
         lng: wp.lng,
-        label: isFirst ? 'A' : isLast ? 'B' : String(i),
+        label: isFirst ? 'Điểm xuất phát' : isLast ? 'Điểm đến' : `Trạm ${i}`,
         type: isFirst ? 'start' : isLast ? 'end' : 'stop',
       };
     });
@@ -451,7 +540,11 @@ export const CreateRouteScreen: React.FC = () => {
         value={origin}
         onSelect={setOrigin}
         onClear={() => setOrigin(null)}
-        onFocus={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+        onFocus={() => {
+          setTimeout(() => {
+            scrollRef.current?.scrollTo({ y: 0, animated: true });
+          }, 100);
+        }}
       />
       <View style={styles.divLine} />
       <Text style={styles.panelLabel}>ĐIỂM ĐẾN</Text>
@@ -462,7 +555,11 @@ export const CreateRouteScreen: React.FC = () => {
         onSelect={setDestination}
         onClear={() => setDestination(null)}
         biasLocation={origin ? `${origin.lat},${origin.lng}` : undefined}
-        onFocus={() => scrollRef.current?.scrollTo({ y: 140, animated: true })}
+        onFocus={() => {
+          setTimeout(() => {
+            scrollRef.current?.scrollTo({ y: 75, animated: true });
+          }, 100);
+        }}
       />
       {!canProceed && (
         <View style={styles.hintRow}>
@@ -478,15 +575,23 @@ export const CreateRouteScreen: React.FC = () => {
       {/* Summary */}
       <View style={styles.routeSummary}>
         <View style={[styles.chip, { backgroundColor: '#E8F5E9' }]}>
-          <Ionicons name="radio-button-on" size={13} color={C.success} />
-          <Text style={[styles.chipText, { color: '#2E7D32' }]} numberOfLines={1}>
+          <View style={[styles.chipDot, { backgroundColor: C.success }]} />
+          <Text
+            style={[styles.chipText, { color: '#2E7D32' }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {origin?.name}
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={14} color={C.sub} />
+        <Ionicons name="chevron-forward" size={14} color={C.sub} style={{ flexShrink: 0 }} />
         <View style={[styles.chip, { backgroundColor: '#FFEBEE' }]}>
-          <Ionicons name="location" size={13} color={C.danger} />
-          <Text style={[styles.chipText, { color: '#C62828' }]} numberOfLines={1}>
+          <View style={[styles.chipDot, { backgroundColor: C.danger }]} />
+          <Text
+            style={[styles.chipText, { color: '#C62828' }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {destination?.name}
           </Text>
         </View>
@@ -669,8 +774,13 @@ export const CreateRouteScreen: React.FC = () => {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Bản đồ với style sáng mặc định của Goong */}
-        <View style={styles.mapWrap}>
+        {/* Bản đồ: Ở Phase 0 co dãn từ từ bằng Animated.View mapHeightAnim */}
+        <Animated.View
+          style={[
+            styles.mapWrap,
+            phase === 0 ? { height: mapHeightAnim } : { height: 240 },
+          ]}
+        >
           <SharedGoongMap
             ref={webviewRef}
             style={styles.webview}
@@ -678,64 +788,82 @@ export const CreateRouteScreen: React.FC = () => {
             routeCoords={routeCoords}
             variant="default"
           />
-          {/* Badge on map */}
-          <View style={styles.mapBadge} pointerEvents="none">
-            <Text style={styles.mapBadgeText}>
-              {phase === 0
-                ? 'Tìm kiếm điểm đầu và đích bên dưới'
-                : phase === 1
-                  ? 'Thêm điểm dừng · bấm "Xem lộ trình" khi xong'
-                  : routeLoading
-                    ? 'Đang tính lộ trình qua Backend...'
-                    : `Lộ trình Road2D · ${fmtDistance(totalDist)}`}
-            </Text>
-          </View>
+          {/* Badge on map (ẩn khi bàn phím mở để không che map) */}
+          {!isKeyboardVisible && (
+            <View style={styles.mapBadge} pointerEvents="none">
+              <Text style={styles.mapBadgeText}>
+                {phase === 0
+                  ? 'Tìm kiếm điểm đầu và đích bên dưới'
+                  : phase === 1
+                    ? 'Thêm điểm dừng · bấm "Xem lộ trình" khi xong'
+                    : routeLoading
+                      ? 'Đang tính lộ trình qua Backend...'
+                      : `Lộ trình Road2D · ${fmtDistance(totalDist)}`}
+              </Text>
+            </View>
+          )}
           {routeLoading && (
             <View style={styles.routeLoader}>
               <ActivityIndicator color={C.primary} size="large" />
               <Text style={styles.routeLoaderText}>Đang tính lộ trình xe máy qua backend...</Text>
             </View>
           )}
-        </View>
+        </Animated.View>
 
-        {/* Bottom panel */}
-        <ScrollView
-          ref={scrollRef}
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 220 }]}
-          keyboardShouldPersistTaps="handled"
-        >
-          {phase === 0 && renderPhase0()}
-          {phase === 1 && renderPhase1()}
-          {phase === 2 && renderPhase2()}
-        </ScrollView>
+        {/* Bottom panel: Luôn hiển thị đầy đủ, mượt mà bám sát dưới bản đồ */}
+        {phase === 0 ? (
+          <View style={styles.phase0Container}>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.scrollPhase0}
+              contentContainerStyle={styles.scrollContentPhase0}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              {renderPhase0()}
+            </ScrollView>
+          </View>
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
+            keyboardShouldPersistTaps="handled"
+          >
+            {phase === 1 && renderPhase1()}
+            {phase === 2 && renderPhase2()}
+          </ScrollView>
+        )}
       </KeyboardAvoidingView>
 
-      {/* CTA bar */}
-      <View style={styles.ctaBar}>
-        <TouchableOpacity
-          style={[styles.ctaBtn, ctaDisabled && styles.ctaBtnOff]}
-          onPress={handleCta}
-          disabled={ctaDisabled}
-          activeOpacity={ctaDisabled ? 1 : 0.85}
-        >
-          {routeLoading ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <>
-              <Text style={styles.ctaText}>{getCtaLabel()}</Text>
-              {!ctaDisabled && (
-                <Ionicons
-                  name={phase === 2 ? 'checkmark' : 'arrow-forward'}
-                  size={18}
-                  color="#FFF"
-                  style={{ marginLeft: 8 }}
-                />
-              )}
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* CTA bar (ở Phase 0 chỉ hiện khi không nhập phím để nhường toàn bộ chỗ cho ô nhập và gợi ý) */}
+      {(!isKeyboardVisible || phase !== 0) && (
+        <View style={styles.ctaBar}>
+          <TouchableOpacity
+            style={[styles.ctaBtn, ctaDisabled && styles.ctaBtnOff]}
+            onPress={handleCta}
+            disabled={ctaDisabled}
+            activeOpacity={ctaDisabled ? 1 : 0.85}
+          >
+            {routeLoading ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <>
+                <Text style={styles.ctaText}>{getCtaLabel()}</Text>
+                {!ctaDisabled && (
+                  <Ionicons
+                    name={phase === 2 ? 'checkmark' : 'arrow-forward'}
+                    size={18}
+                    color="#FFF"
+                    style={{ marginLeft: 8 }}
+                  />
+                )}
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -746,6 +874,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: C.bg,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    paddingBottom: 4,
   },
   header: {
     flexDirection: 'row',
@@ -783,9 +912,22 @@ const styles = StyleSheet.create({
     backgroundColor: C.primary,
   },
   mapWrap: {
-    height: 250,
     backgroundColor: C.mapDark,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  phase0Container: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  scrollPhase0: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  scrollContentPhase0: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   webview: {
     flex: 1,
@@ -833,6 +975,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: C.border,
+    overflow: 'hidden',
   },
   panelLabel: {
     fontSize: 11,
@@ -867,18 +1010,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 14,
-    flexWrap: 'wrap',
+    width: '100%',
   },
   chip: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 7,
     borderRadius: 12,
-    maxWidth: '44%',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  chipDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
   },
   chipText: {
+    flex: 1,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1013,7 +1165,8 @@ const styles = StyleSheet.create({
   },
   ctaBar: {
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingTop: 10,
+    paddingBottom: 16,
     backgroundColor: C.card,
     borderTopWidth: 1,
     borderTopColor: C.border,

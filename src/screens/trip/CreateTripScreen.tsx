@@ -324,14 +324,14 @@ const CreateTripScreen = () => {
       <Modal visible={showDatePicker} transparent animationType="slide">
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <View style={{ backgroundColor: '#FFF', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 16, color: C.heading }}>Chọn thời gian xuất phát</Text>
+            <Text style={{ fontSize: 19.5, fontWeight: 'bold', marginBottom: 16, color: C.heading }}>Chọn thời gian xuất phát</Text>
             {['05:00 — 24/12/2026', '06:00 — 25/12/2026', '07:30 — 01/01/2027', '08:00 — 15/01/2027'].map(d => (
               <TouchableOpacity key={d} style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border }} onPress={() => { setStartDate(d); setShowDatePicker(false); }}>
-                <Text style={{ fontSize: 16, color: startDate === d ? C.primary : C.text, fontWeight: startDate === d ? 'bold' : 'normal' }}>{d}</Text>
+                <Text style={{ fontSize: 17.5, color: startDate === d ? C.primary : C.text, fontWeight: startDate === d ? 'bold' : 'normal' }}>{d}</Text>
               </TouchableOpacity>
             ))}
             <TouchableOpacity style={{ marginTop: 20, padding: 16, backgroundColor: C.primary, borderRadius: 14, alignItems: 'center' }} onPress={() => setShowDatePicker(false)}>
-              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>Xong</Text>
+              <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 17.5 }}>Xong</Text>
             </TouchableOpacity>
           </View>
         </View>

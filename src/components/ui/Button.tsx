@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
   },
   // Text Styles
   textBase: {
-    ...typography.h3,
+    fontSize: 16,
     fontWeight: '600',
   },
   smText: {

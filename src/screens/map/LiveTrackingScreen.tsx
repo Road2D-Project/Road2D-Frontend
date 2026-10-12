@@ -113,7 +113,7 @@ const MemberRow = ({ member, isMe }: { member: TrackingMember; isMe: boolean }) 
         />
         {member.role === 'leader' && (
           <View style={styles.leaderCrown}>
-            <Text style={{ fontSize: 8 }}>⭐</Text>
+            <Text style={{ fontSize: 9.5 }}>⭐</Text>
           </View>
         )}
       </View>
