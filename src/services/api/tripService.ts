@@ -6,6 +6,7 @@
  */
 import apiClient from './index';
 import { USE_MOCK } from '../../config/env';
+import { useAuthStore } from '../../store/useAuthStore';
 import { MOCK_CURRENT_USER } from '../../mocks/mockData';
 import { MOCK_FRIENDS } from '../../mocks/mockData';
 import { mockDb, delay } from '../../mocks/mockStore';
@@ -40,10 +41,16 @@ const tripService = {
       await delay(500);
       return [...mockDb.trips];
     }
-    // GET /v1/trips -> trả về { trips: TripResponse[] }
-    const res = await apiClient.get<any>('/trips');
-    const list = Array.isArray(res.data) ? res.data : (res.data?.trips ?? []);
-    return list.map(mapBackendTripToFrontend);
+    try {
+      // GET /v1/trips -> trả về { trips: TripResponse[] }
+      const res = await apiClient.get<any>('/trips');
+      console.log('[Trip API] 📡 GET /v1/trips response:', res.data);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.trips ?? []);
+      return list.map(mapBackendTripToFrontend);
+    } catch (err: any) {
+      console.error('[Trip API Error] ❌ GET /v1/trips failed:', err?.response?.status, err?.response?.data || err?.message);
+      throw err;
+    }
   },
 
   /** GET /trips/:id */
@@ -112,13 +119,19 @@ const tripService = {
     // POST /v1/trips (CreateTripRequest)
     const validUuidIds = payload.invitedUserIds?.filter((id) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-    );
+    ) || [];
+    const currentUserId = useAuthStore.getState().user?.id;
+    const isCurrentUuid = currentUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentUserId);
+    const memberUserIds = validUuidIds.length > 0 
+      ? validUuidIds 
+      : (isCurrentUuid ? [currentUserId] : []);
+
     const bePayload: any = {
       name: payload.name,
       note: payload.note || '',
-      tripType: 'bronze',
+      tripType: payload.tripType || 'bronze',
       visibility: !!payload.isPublic,
-      memberUserIds: validUuidIds && validUuidIds.length > 0 ? validUuidIds : [MOCK_CURRENT_USER.id],
+      memberUserIds: memberUserIds.length > 0 ? memberUserIds : undefined,
     };
     if (payload.startAt) {
       try {

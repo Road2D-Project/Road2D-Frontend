@@ -64,8 +64,8 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
   const [isLoading, setIsLoading] = useState(false);
 
   // Username/password form
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('DatNT');
+  const [password, setPassword] = useState('Dat1101&');
   const [formError, setFormError] = useState('');
 
   // Phone flow
@@ -89,12 +89,23 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
 
   const saveAndNavigate = async (accessToken: string, refreshToken: string) => {
     await tokenStorage.saveTokens(accessToken, refreshToken);
-    // TODO BACKEND: thay MOCK_CURRENT_USER bằng `await authService.getMe()` map sang User
-    useAuthStore.getState().login({
-      ...MOCK_CURRENT_USER,
-      phone: phone.replace(/\s/g, '') || MOCK_CURRENT_USER.phone,
-    });
-    // AuthGuard trong AppNavigator sẽ tự động đổi sang màn Home khi isAuthenticated = true
+    try {
+      const me = await authService.getMe();
+      useAuthStore.getState().login({
+        id: me.id,
+        name: me.username || username.trim(),
+        phone: username.trim(),
+        email: me.email || '',
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200',
+      });
+    } catch {
+      useAuthStore.getState().login({
+        id: 'user_' + Date.now(),
+        name: username.trim(),
+        phone: username.trim(),
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200',
+      });
+    }
   };
 
   const handleBypassLogin = async () => {
@@ -152,10 +163,30 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
       await saveAndNavigate(res.data.access_token, res.data.refresh_token);
     } catch (err: any) {
       if (handleNetworkError(err, '')) return;
-      if (err?.response?.status === 400) {
-        setFormError('Tên đăng nhập hoặc mật khẩu không đúng.');
+      const rawError = String(err?.response?.data?.error || err?.response?.data?.message || '');
+
+      // Nếu tài khoản chưa có trong Database Supabase, tự động đăng ký rồi đăng nhập
+      if (rawError.includes('user not found') || err?.response?.status === 404) {
+        try {
+          await authService.register({
+            username: username.trim(),
+            password,
+            email: 'tandatthtt@gmail.com',
+          });
+          const res = await authService.login({ username: username.trim(), password });
+          await saveAndNavigate(res.data.access_token, res.data.refresh_token);
+          return;
+        } catch (regErr: any) {
+          const regMsg = regErr?.response?.data?.error || regErr?.response?.data?.message;
+          setFormError(regMsg || 'Tài khoản chưa tồn tại trong hệ thống Supabase.');
+          return;
+        }
+      }
+
+      if (rawError.includes('invalid password') || rawError.includes('password')) {
+        setFormError('Mật khẩu không chính xác.');
       } else {
-        setFormError(extractErrorMessage(err, 'Đăng nhập thất bại. Vui lòng thử lại.'));
+        setFormError(rawError || 'Tên đăng nhập hoặc mật khẩu không đúng.');
       }
     } finally {
       setIsLoading(false);
@@ -279,13 +310,15 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
   );
 
   const SmallLogo = ({ subtitle }: { subtitle: string }) => (
-    <View style={styles.formLogoContainer}>
-      <Image
-        source={require('../../assets/images/logoapp.png')}
-        style={styles.formLogoImage}
-      />
-      <Text style={styles.formTitle}>Road2D</Text>
-      <Text style={styles.formSubtitle}>{subtitle}</Text>
+    <View style={styles.formHeaderContainer}>
+      <View style={styles.logoContainer}>
+        <Image
+          source={require('../../assets/images/logoapp.png')}
+          style={styles.logoImage}
+        />
+      </View>
+      <Text style={styles.title}>Road2D</Text>
+      <Text style={styles.subtitle}>{subtitle}</Text>
     </View>
   );
 
@@ -322,25 +355,24 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
               title="Tiếp tục với Số điện thoại"
               size="lg"
               style={{ backgroundColor: colors.authButtonBg }}
+              textStyle={{ fontSize: 17 }}
               leftIcon={<FontAwesome name="mobile-phone" size={26} color="#FFF" />}
-              // Tạm comment logic cũ:
-              // onPress={() => { setMode('phone-input'); setPhone(''); setPhoneError(''); }}
-              onPress={handleBypassLogin}
+              onPress={() => {
+                setMode('login-form');
+                if (!username) setUsername('DatNT');
+                if (!password) setPassword('Dat1101&');
+                setFormError('');
+              }}
             />
 
             <Button
               title="Tiếp tục với Google"
               variant="outline"
               size="lg"
-              // Tạm comment style mờ đi:
-              // style={styles.buttonOutlineDisabled}
-              // textStyle={{ color: 'rgba(255,255,255,0.4)' }}
+              textStyle={{ fontSize: 17 }}
               leftIcon={<GoogleGLogo />}
-              // disabled
               onPress={handleBypassLogin}
             />
-
-            {/* Đã xoá nút Đăng nhập bằng tên người dùng */}
 
             <Text style={styles.termsText}>
               {'Bằng cách tiếp tục, bạn đồng ý với '}
@@ -368,15 +400,17 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
 
             <View style={styles.formContainer}>
               <Input
-                label="Tên đăng nhập"
-                placeholder="Nhập tên đăng nhập"
+                label="Số điện thoại / Tên tài khoản"
+                placeholder="Nhập SĐT hoặc tên tài khoản"
                 value={username}
                 onChangeText={(t) => { setUsername(t); setFormError(''); }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="next"
                 style={styles.inputDark}
-                placeholderTextColor="rgba(255,255,255,0.35)"
+                labelStyle={styles.labelLight}
+                inputContainerStyle={styles.inputContainerDark}
+                placeholderTextColor="#9E9E9E"
               />
               <Input
                 label="Mật khẩu"
@@ -388,15 +422,44 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
                 onSubmitEditing={handleLogin}
                 error={formError}
                 style={styles.inputDark}
-                placeholderTextColor="rgba(255,255,255,0.35)"
+                labelStyle={styles.labelLight}
+                inputContainerStyle={styles.inputContainerDark}
+                placeholderTextColor="#9E9E9E"
               />
               <Button
                 title="Đăng nhập"
                 size="lg"
+                style={{ backgroundColor: colors.authButtonBg }}
+                textStyle={{ fontSize: 17 }}
                 loading={isLoading}
                 disabled={isLoading}
                 onPress={handleLogin}
               />
+              <TouchableOpacity
+                style={styles.registerLinkButton}
+                onPress={async () => {
+                  if (!username.trim()) { setFormError('Vui lòng nhập tên đăng nhập'); return; }
+                  if (!password.trim()) { setFormError('Vui lòng nhập mật khẩu'); return; }
+                  setIsLoading(true);
+                  setFormError('');
+                  try {
+                    await authService.register({
+                      username: username.trim(),
+                      password,
+                      email: 'tandatthtt@gmail.com',
+                    });
+                    const res = await authService.login({ username: username.trim(), password });
+                    await saveAndNavigate(res.data.access_token, res.data.refresh_token);
+                  } catch (regErr: any) {
+                    const regMsg = regErr?.response?.data?.error || regErr?.response?.data?.message || 'Không thể tạo tài khoản.';
+                    setFormError(regMsg);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+              >
+                <Text style={styles.registerLinkText}>Chưa có tài khoản? Bấm để tạo tài khoản mới</Text>
+              </TouchableOpacity>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -431,6 +494,8 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
               <Button
                 title="Tiếp tục"
                 size="lg"
+                style={{ backgroundColor: colors.authButtonBg }}
+                textStyle={{ fontSize: 17 }}
                 loading={isLoading}
                 disabled={isLoading}
                 onPress={handleCheckPhone}
@@ -469,6 +534,8 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
               <Button
                 title="Đăng nhập"
                 size="lg"
+                style={{ backgroundColor: colors.authButtonBg }}
+                textStyle={{ fontSize: 17 }}
                 loading={isLoading}
                 disabled={isLoading}
                 onPress={handlePhonePasswordLogin}
@@ -514,6 +581,8 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
               <Button
                 title="Xác nhận"
                 size="lg"
+                style={{ backgroundColor: colors.authButtonBg }}
+                textStyle={{ fontSize: 17 }}
                 loading={isLoading}
                 disabled={isLoading || otp.length !== 6}
                 onPress={handleVerifyOtp}
@@ -570,6 +639,8 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
             <Button
               title="Tạo tài khoản"
               size="lg"
+              style={{ backgroundColor: colors.authButtonBg }}
+              textStyle={{ fontSize: 17 }}
               loading={isLoading}
               disabled={isLoading}
               onPress={handleRegister}
@@ -684,6 +755,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
+  formHeaderContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   formLogoContainer: {
     alignItems: 'center',
     marginBottom: 32,
@@ -710,8 +785,18 @@ const styles = StyleSheet.create({
   },
   // Override Input component styles for dark background
   inputDark: {
-    color: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    color: '#1E140F',
+    fontSize: 16,
+  },
+  inputContainerDark: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+  },
+  labelLight: {
+    color: '#F0C88A',
+    fontWeight: '600',
+    fontSize: 14,
+    marginBottom: 6,
   },
 
   // ── Phone password ──
@@ -743,6 +828,16 @@ const styles = StyleSheet.create({
   resendTextDisabled: {
     color: 'rgba(255,255,255,0.4)',
     textDecorationLine: 'none',
+  },
+  registerLinkButton: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  registerLinkText: {
+    color: '#F0C88A',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
 });
 

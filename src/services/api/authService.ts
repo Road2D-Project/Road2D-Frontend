@@ -65,8 +65,31 @@ const authService = {
       }
       return { data: { access_token: 'mock_access_token', refresh_token: 'mock_refresh_token' } };
     }
-    // TODO BACKEND: POST /auth/user/login
-    const response = await apiClient.post<LoginResponse>('/auth/user/login', payload);
+    const response = await apiClient.post<any>('/auth/user/login', payload);
+    const d = response.data?.data || response.data;
+    return {
+      data: {
+        access_token: d?.accessToken || d?.access_token || '',
+        refresh_token: d?.refreshToken || d?.refresh_token || '',
+      },
+    };
+  },
+
+  /**
+   * Đăng ký tài khoản mới bằng username + password.
+   * POST /auth/user/register
+   */
+  register: async (payload: { username: string; email?: string; password: string }): Promise<any> => {
+    if (USE_MOCK) {
+      await delay(800);
+      return { data: { id: 'usr_mock_' + Date.now() } };
+    }
+    const response = await apiClient.post<any>('/auth/user/register', {
+      username: payload.username,
+      email: payload.email || `${payload.username.toLowerCase()}@road2d.app`,
+      password: payload.password,
+      confirmPassword: payload.password,
+    });
     return response.data;
   },
 

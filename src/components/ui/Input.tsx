@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography } from './Typography';
 import { colors } from '../../theme/colors';
 
@@ -15,6 +16,8 @@ interface InputProps extends TextInputProps {
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
   showCharacterCount?: boolean;
+  labelStyle?: any;
+  inputContainerStyle?: any;
 }
 
 export const Input = ({
@@ -26,6 +29,8 @@ export const Input = ({
   maxLength,
   value = '',
   style,
+  labelStyle,
+  inputContainerStyle,
   secureTextEntry,
   ...props
 }: InputProps) => {
@@ -41,12 +46,12 @@ export const Input = ({
   return (
     <View style={styles.container}>
       {label && (
-        <Typography variant="label" style={styles.label}>
+        <Typography variant="label" style={[styles.label, labelStyle]}>
           {label}
         </Typography>
       )}
 
-      <View style={[styles.inputContainer, { borderColor: containerBorderColor }]}>
+      <View style={[styles.inputContainer, { borderColor: containerBorderColor }, inputContainerStyle]}>
         {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
 
         <TextInput
@@ -64,11 +69,13 @@ export const Input = ({
           <TouchableOpacity
             style={styles.rightIcon}
             onPress={() => setIsPasswordVisible(!isPasswordVisible)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            {/* Ideally replace with an eye icon from vector-icons passed from parent, but we handle the toggle here */}
-            <Typography variant="caption" color="secondary">
-              {isPasswordVisible ? 'Hide' : 'Show'}
-            </Typography>
+            <Ionicons
+              name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color={colors.textSecondary}
+            />
           </TouchableOpacity>
         ) : (
           rightIcon && <View style={styles.rightIcon}>{rightIcon}</View>

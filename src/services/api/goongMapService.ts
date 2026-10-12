@@ -199,9 +199,16 @@ export const goongMapService = {
       };
 
       const reqUrl = `${baseUrl}/goong/directions`;
-      console.log(`[Goong API] 📡 Directions: ${reqUrl}`);
+      const fullQueryUrl = `${reqUrl}?origin=${params.origin}&destination=${params.destination}&vehicle=${params.vehicle}`;
+      console.log(`[Goong API] 📡 Directions: ${fullQueryUrl}`);
+      console.log(`[Goong API] 📋 Test bằng cURL trên máy tính:\ncurl '${fullQueryUrl}' -H 'X-Playground-Key: ${activeKey}'`);
 
-      const res = await goongHttp.get(reqUrl, { params });
+      const res = await goongHttp.get(reqUrl, {
+        params,
+        headers: {
+          'X-Playground-Key': activeKey,
+        },
+      });
 
       const leg = res.data;
       // HandleDirection trả về tripmodel.Leg với trường polyline (encoded string)
@@ -216,10 +223,15 @@ export const goongMapService = {
       directionsCache.set(cacheKey, result);
       return result;
     } catch (err: any) {
-      const errDetail = err?.response
-        ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data)}`
-        : (err?.code ? `${err.message} (${err.code})` : err?.message || String(err));
-      console.error(`[Goong API Error] ❌ Directions failed: ${errDetail}`);
+      if (err?.response) {
+        console.error(`[Goong API Error] ❌ Directions failed HTTP ${err.response.status}`);
+        console.error(`[Goong API Error] 📄 Response Body:`, JSON.stringify(err.response.data, null, 2));
+        console.error(`[Goong API Error] 🌐 Request URL:`, err.config?.url);
+        console.error(`[Goong API Error] 📦 Request Params:`, JSON.stringify(err.config?.params, null, 2));
+        console.error(`[Goong API Error] 🔑 Request Headers:`, JSON.stringify(err.config?.headers, null, 2));
+      } else {
+        console.error(`[Goong API Error] ❌ Directions Network Error:`, err?.message || String(err));
+      }
       return null;
     }
   },

@@ -23,6 +23,7 @@ import {
   Platform,
   StatusBar,
   Keyboard,
+  Alert,
   KeyboardAvoidingView,
   Animated,
   Dimensions,
@@ -63,8 +64,11 @@ const C = {
 };
 
 type Waypoint = PlaceDetail;
+export interface StopWaypoint extends PlaceDetail {
+  stayMinutes: number;
+}
 type RouteLeg = RouteLegResult;
-type Phase = 0 | 1 | 2;
+type Phase = 0 | 1;
 
 // ─── Search Box Component ─────────────────────────────────────────────────────
 interface SearchBoxProps {
@@ -352,7 +356,7 @@ export const CreateRouteScreen: React.FC = () => {
   const [phase, setPhase] = useState<Phase>(0);
   const [origin, setOrigin] = useState<Waypoint | null>(null);
   const [destination, setDestination] = useState<Waypoint | null>(null);
-  const [stops, setStops] = useState<Waypoint[]>([]);
+  const [stops, setStops] = useState<StopWaypoint[]>([]);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const mapHeightAnim = useRef(new Animated.Value(NORMAL_MAP_HEIGHT)).current;
 
@@ -392,7 +396,7 @@ export const CreateRouteScreen: React.FC = () => {
   const [stopLoading, setStopLoading] = useState(false);
   const stopDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Phase 2: routing
+  // Routing
   const [legs, setLegs] = useState<RouteLeg[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
 
@@ -422,8 +426,8 @@ export const CreateRouteScreen: React.FC = () => {
 
   // Danh sách toạ độ tuyến đường
   const routeCoords = useMemo(() => {
-    return phase === 2 ? legs.flatMap((l) => l.coords) : [];
-  }, [phase, legs]);
+    return legs.flatMap((l) => l.coords);
+  }, [legs]);
 
   // ── Stop search ──
   const handleStopQuery = useCallback(
@@ -451,24 +455,45 @@ export const CreateRouteScreen: React.FC = () => {
     const detail = await goongMapService.getPlaceDetail(pred.place_id);
     setStopLoading(false);
     if (!detail) return;
-    setStops((prev) => [...prev, detail]);
+    setStops((prev) => [...prev, { ...detail, stayMinutes: 15 }]);
     setStopQuery('');
     setStopPreds([]);
   }, []);
 
-  // ── Phase 2: fetch route qua Backend ──
-  const fetchRoute = useCallback(async () => {
+  const updateStopStay = useCallback((index: number, minutes: number) => {
+    setStops((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, stayMinutes: Math.max(0, minutes) } : s))
+    );
+  }, []);
+
+  const fmtDistance = (m: number) =>
+    m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
+  const fmtDuration = (s: number) => {
+    const mins = Math.round(s / 60);
+    if (mins < 60) return `${mins} phút`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h} giờ ${m > 0 ? `${m}p` : ''}`;
+  };
+
+  // ── Tính toán lộ trình và quay trở lại CreateTripScreen ──
+  const fetchRouteAndFinish = useCallback(async () => {
     setRouteLoading(true);
     setLegs([]);
     const pts = allWaypoints;
     const results: RouteLeg[] = [];
 
+    let hasError = false;
     for (let i = 0; i < pts.length - 1; i++) {
       const leg = await goongMapService.getDirections(
         { lat: pts[i].lat, lng: pts[i].lng },
         { lat: pts[i + 1].lat, lng: pts[i + 1].lng },
         'bike'
       );
+      if (!leg) {
+        hasError = true;
+      }
       results.push(
         leg ?? {
           coords: [
@@ -483,50 +508,59 @@ export const CreateRouteScreen: React.FC = () => {
 
     setLegs(results);
     setRouteLoading(false);
-    setPhase(2);
-  }, [allWaypoints]);
+
+    if (hasError) {
+      Alert.alert(
+        'Lưu ý lộ trình',
+        'Có chặng đường chưa tải được điều hướng chi tiết. Hệ thống sẽ kết nối đường thẳng trên bản đồ.'
+      );
+    }
+
+    const totalDist = results.reduce((s, l) => s + l.distanceM, 0);
+    const travelDurationS = results.reduce((s, l) => s + l.durationS, 0);
+    const restDurationMinutes = stops.reduce((s, st) => s + (st.stayMinutes || 15), 0);
+    const totalDurationS = travelDurationS + restDurationMinutes * 60;
+
+    const customRoute = {
+      id: 'route_' + Date.now(),
+      name: `${origin?.name} → ${destination?.name}`,
+      distance: fmtDistance(totalDist),
+      distanceM: totalDist,
+      travelDurationS,
+      travelDurationFormatted: fmtDuration(travelDurationS),
+      restDurationMinutes,
+      totalDurationS,
+      duration: fmtDuration(totalDurationS),
+      stopsCount: stops.length,
+      image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
+      origin,
+      destination,
+      stops: stops.map((s, idx) => ({
+        ...s,
+        order: idx + 1,
+        stayMinutes: s.stayMinutes || 15,
+      })),
+      waypoints: allWaypoints,
+      legs: results,
+      polylineCoords: results.flatMap((l) => l.coords),
+    };
+
+    (navigation as any).navigate('CreateTrip', { customRoute });
+  }, [allWaypoints, origin, destination, stops, navigation]);
 
   // ── CTA Helpers ──
   const getCtaLabel = () => {
     if (phase === 0) return canProceed ? 'Tiếp theo: Thêm điểm dừng' : 'Chọn điểm đầu & điểm đến';
-    if (phase === 1) return routeLoading ? 'Đang tính lộ trình...' : 'Xem lộ trình';
-    return 'Xác nhận lộ trình';
+    return routeLoading ? 'Đang tính lộ trình...' : 'Xong & Xem lộ trình';
   };
 
   const ctaDisabled = (phase === 0 && !canProceed) || routeLoading;
-
-  const totalDist = legs.reduce((s, l) => s + l.distanceM, 0);
-  const totalDur = legs.reduce((s, l) => s + l.durationS, 0);
-
-  const fmtDistance = (m: number) =>
-    m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
-
-  const fmtDuration = (s: number) => {
-    const mins = Math.round(s / 60);
-    if (mins < 60) return `${mins} phút`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return `${h} giờ ${m > 0 ? `${m}p` : ''}`;
-  };
 
   const handleCta = () => {
     if (phase === 0 && canProceed) {
       setPhase(1);
     } else if (phase === 1 && !routeLoading) {
-      fetchRoute();
-    } else if (phase === 2) {
-      // Chuyển kết quả lộ trình sang wizard CreateTrip
-      const customRoute = {
-        id: 'route_' + Date.now(),
-        name: `${origin?.name} → ${destination?.name}`,
-        distance: fmtDistance(totalDist),
-        duration: fmtDuration(totalDur),
-        stops: stops.length,
-        image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
-        waypoints: allWaypoints,
-        polylineCoords: routeCoords,
-      };
-      (navigation as any).navigate('CreateTrip', { customRoute });
+      fetchRouteAndFinish();
     }
   };
 
@@ -603,24 +637,71 @@ export const CreateRouteScreen: React.FC = () => {
       </Text>
 
       {stops.map((s, i) => (
-        <View key={s.place_id + i} style={styles.stopRow}>
-          <View style={styles.stopBadge}>
-            <Text style={styles.stopBadgeText}>{i + 1}</Text>
+        <View key={s.place_id + i} style={styles.stopCard}>
+          <View style={styles.stopCardHeader}>
+            <View style={styles.stopBadge}>
+              <Text style={styles.stopBadgeText}>{i + 1}</Text>
+            </View>
+            <View style={styles.stopInfo}>
+              <Text style={styles.stopName} numberOfLines={1}>
+                {s.name}
+              </Text>
+              <Text style={styles.stopAddr} numberOfLines={1}>
+                {s.address}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setStops((prev) => prev.filter((_, j) => j !== i))}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.stopDeleteBtn}
+            >
+              <Ionicons name="trash-outline" size={17} color={C.primary} />
+            </TouchableOpacity>
           </View>
-          <View style={styles.stopInfo}>
-            <Text style={styles.stopName} numberOfLines={1}>
-              {s.name}
-            </Text>
-            <Text style={styles.stopAddr} numberOfLines={1}>
-              {s.address}
-            </Text>
+
+          {/* Ô nhập thời gian dừng nghỉ */}
+          <View style={styles.stayTimeBox}>
+            <View style={styles.stayTimeHeader}>
+              <Ionicons name="time-outline" size={15} color={C.primary} />
+              <Text style={styles.stayTimeLabel}>Thời gian dừng nghỉ:</Text>
+              <View style={styles.stayInputWrapper}>
+                <TextInput
+                  style={styles.stayInput}
+                  value={String(s.stayMinutes ?? 15)}
+                  onChangeText={(val) => {
+                    const num = parseInt(val.replace(/[^0-9]/g, '')) || 0;
+                    updateStopStay(i, num);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                />
+                <Text style={styles.stayInputUnit}>phút</Text>
+              </View>
+            </View>
+
+            {/* Quick chips */}
+            <View style={styles.quickStayRow}>
+              {[15, 30, 45, 60].map((mins) => (
+                <TouchableOpacity
+                  key={mins}
+                  style={[
+                    styles.quickStayChip,
+                    (s.stayMinutes ?? 15) === mins && styles.quickStayChipActive,
+                  ]}
+                  onPress={() => updateStopStay(i, mins)}
+                >
+                  <Text
+                    style={[
+                      styles.quickStayChipText,
+                      (s.stayMinutes ?? 15) === mins && styles.quickStayChipTextActive,
+                    ]}
+                  >
+                    +{mins}p
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-          <TouchableOpacity
-            onPress={() => setStops((prev) => prev.filter((_, j) => j !== i))}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="trash-outline" size={18} color={C.primary} />
-          </TouchableOpacity>
         </View>
       ))}
 
@@ -669,76 +750,9 @@ export const CreateRouteScreen: React.FC = () => {
     </View>
   );
 
-  const renderPhase2 = () => (
-    <View style={styles.panel}>
-      {/* Metric strip */}
-      {totalDist > 0 && (
-        <View style={styles.metricStrip}>
-          <View style={styles.metricItem}>
-            <Ionicons name="bicycle" size={18} color={C.primary} />
-            <Text style={styles.metricVal}>{fmtDistance(totalDist)}</Text>
-            <Text style={styles.metricLbl}>Quãng đường</Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            <Ionicons name="time-outline" size={18} color={C.primary} />
-            <Text style={styles.metricVal}>{fmtDuration(totalDur)}</Text>
-            <Text style={styles.metricLbl}>Thời gian</Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            <Ionicons name="location-outline" size={18} color={C.primary} />
-            <Text style={styles.metricVal}>{allWaypoints.length}</Text>
-            <Text style={styles.metricLbl}>Điểm</Text>
-          </View>
-        </View>
-      )}
-
-      <Text style={styles.panelLabel}>LỘ TRÌNH ĐÃ TÍNH TOÁN</Text>
-
-      {allWaypoints.map((wp, i) => (
-        <View key={wp.place_id + i} style={styles.routeRow}>
-          <View style={styles.routeLeft}>
-            <View
-              style={[
-                styles.routeDot,
-                i === 0 && { backgroundColor: C.success },
-                i === allWaypoints.length - 1 && { backgroundColor: C.danger },
-                i > 0 && i < allWaypoints.length - 1 && { backgroundColor: C.primary },
-              ]}
-            />
-            {i < allWaypoints.length - 1 && <View style={styles.routeConnector} />}
-          </View>
-          <View style={styles.routeInfo}>
-            <Text style={styles.routeLabel}>
-              {i === 0 ? 'XUẤT PHÁT' : i === allWaypoints.length - 1 ? 'ĐIỂM ĐẾN' : `TRẠM ${i}`}
-            </Text>
-            <Text style={styles.routeName} numberOfLines={1}>
-              {wp.name}
-            </Text>
-            <Text style={styles.routeAddr} numberOfLines={1}>
-              {wp.address}
-            </Text>
-            {legs[i] && i < allWaypoints.length - 1 && (
-              <Text style={styles.legInfo}>
-                ↓ {fmtDistance(legs[i].distanceM)} · {fmtDuration(legs[i].durationS)}
-              </Text>
-            )}
-          </View>
-        </View>
-      ))}
-
-      <TouchableOpacity style={styles.editBtn} onPress={() => setPhase(1)}>
-        <Feather name="edit-2" size={14} color={C.primary} />
-        <Text style={styles.editBtnText}>Chỉnh sửa điểm dừng</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   const PHASE_TITLES: Record<Phase, string> = {
-    0: 'Chọn điểm đầu & cuối',
-    1: 'Thêm điểm dừng',
-    2: 'Xem lộ trình',
+    0: '1/2 · Chọn điểm đầu & cuối',
+    1: '2/2 · Thêm điểm dừng & thời gian nghỉ',
   };
 
   return (
@@ -750,7 +764,7 @@ export const CreateRouteScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => {
-            if (phase > 0) setPhase((phase - 1) as Phase);
+            if (phase > 0) setPhase(0);
             else navigation.goBack();
           }}
         >
@@ -762,7 +776,7 @@ export const CreateRouteScreen: React.FC = () => {
 
       {/* Phase progress bar */}
       <View style={styles.phaseBar}>
-        {([0, 1, 2] as Phase[]).map((p) => (
+        {([0, 1] as Phase[]).map((p) => (
           <View
             key={p}
             style={[styles.phaseSegment, p <= phase && styles.phaseSegmentActive]}
@@ -794,11 +808,9 @@ export const CreateRouteScreen: React.FC = () => {
               <Text style={styles.mapBadgeText}>
                 {phase === 0
                   ? 'Tìm kiếm điểm đầu và đích bên dưới'
-                  : phase === 1
-                    ? 'Thêm điểm dừng · bấm "Xem lộ trình" khi xong'
-                    : routeLoading
-                      ? 'Đang tính lộ trình qua Backend...'
-                      : `Lộ trình Road2D · ${fmtDistance(totalDist)}`}
+                  : routeLoading
+                    ? 'Đang tính lộ trình qua backend...'
+                    : 'Thêm điểm dừng & thời gian nghỉ · Bấm "Xong" khi hoàn tất'}
               </Text>
             </View>
           )}
@@ -831,8 +843,7 @@ export const CreateRouteScreen: React.FC = () => {
             contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
             keyboardShouldPersistTaps="handled"
           >
-            {phase === 1 && renderPhase1()}
-            {phase === 2 && renderPhase2()}
+            {renderPhase1()}
           </ScrollView>
         )}
       </KeyboardAvoidingView>
@@ -853,7 +864,7 @@ export const CreateRouteScreen: React.FC = () => {
                 <Text style={styles.ctaText}>{getCtaLabel()}</Text>
                 {!ctaDisabled && (
                   <Ionicons
-                    name={phase === 2 ? 'checkmark' : 'arrow-forward'}
+                    name={phase === 1 ? 'checkmark' : 'arrow-forward'}
                     size={18}
                     color="#FFF"
                     style={{ marginLeft: 8 }}
@@ -1033,6 +1044,95 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontWeight: '600',
+  },
+  stopCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#EFE6DE',
+    padding: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  stopCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stopDeleteBtn: {
+    padding: 4,
+  },
+  stayTimeBox: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F5EFE9',
+  },
+  stayTimeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  stayTimeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: C.heading,
+    flex: 1,
+  },
+  stayInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EE',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 4,
+  },
+  stayInput: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.primaryDark,
+    textAlign: 'center',
+    minWidth: 28,
+    padding: 0,
+  },
+  stayInputUnit: {
+    fontSize: 11,
+    color: C.sub,
+    fontWeight: '500',
+  },
+  quickStayRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 8,
+    justifyContent: 'flex-end',
+  },
+  quickStayChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: '#FAF5EE',
+    borderWidth: 1,
+    borderColor: '#EFE6DE',
+  },
+  quickStayChipActive: {
+    backgroundColor: C.primary,
+    borderColor: C.primary,
+  },
+  quickStayChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.sub,
+  },
+  quickStayChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   stopRow: {
     flexDirection: 'row',
