@@ -27,10 +27,7 @@ import { useSimulationStore } from '../../store/useSimulationStore';
 import { SimulationEngine } from '../../utils/SimulationEngine';
 import { useTripStore } from '../../store/useTripStore';
 
-// ------------------------------------------------------------------
-// Env keys — đọc từ EXPO_PUBLIC_ prefix
-// ------------------------------------------------------------------
-const GOONG_MAP_KEY = process.env.EXPO_PUBLIC_GOONG_MAP_KEY ?? '';
+import { SharedGoongMap, MapWaypoint, MapMember } from '../../components/map/SharedGoongMap';
 
 // ------------------------------------------------------------------
 // Kích thước màn hình
@@ -41,251 +38,6 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_COLLAPSED_HEIGHT = SCREEN_HEIGHT * 0.42; // ~2/5 màn hình (đã bao gồm tab bar)
 const SHEET_EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.80;  // ~4/5 khi kéo lên
 
-// ------------------------------------------------------------------
-// Hàm build HTML bản đồ Goong MapLibre
-// ------------------------------------------------------------------
-function buildMapHTML(members: TrackingMember[]): string {
-  const { mapCenter, mapZoom, routePolylineCoords, waypoints } = MOCK_TRIP;
-
-  // Serialise dữ liệu để nhúng vào HTML
-  const routeGeoJSON = JSON.stringify(routePolylineCoords);
-  const waypointsJSON = JSON.stringify(waypoints);
-  const membersJSON = JSON.stringify(
-    members.map((m) => ({
-      id: m.id,
-      name: m.name,
-      avatar: m.avatar,
-      lngLat: m.lngLat,
-      status: m.status,
-      role: m.role,
-      speed: m.speed,
-    }))
-  );
-
-  const mapCenterStr = JSON.stringify(mapCenter);
-  const STATUS_COLORS_JSON = JSON.stringify({
-    normal: '#FFFFFF',
-    lost: '#FF9800',
-    no_signal: '#757575',
-    lost_and_no_signal: '#FF5252',
-  });
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; overflow: hidden; background: #3E2B1C; }
-    #map { width: 100%; height: 100%; }
-
-    /* Lọc màu canvas của maplibre thành màu nâu sáng chủ đạo của app (không ảnh hưởng marker) */
-    .maplibregl-canvas {
-      filter: sepia(0.3) hue-rotate(-10deg) saturate(1.2) brightness(1.25) contrast(1.05);
-    }
-
-    /* Member avatar markers */
-    .member-marker {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      border: 3px solid #FFFFFF;
-      cursor: pointer;
-      box-shadow: 0 3px 10px rgba(0,0,0,0.35);
-      position: relative;
-    }
-    .member-marker img {
-      width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
-    }
-    .member-marker.lost { border-color: #FF9800; }
-    .member-marker.no_signal { border-color: #757575; }
-    .member-marker.lost_and_no_signal { border-color: #FF5252; }
-    .member-marker.leader { border-width: 3.5px; }
-
-    /* Lớp overlay để ám màu nhẹ lên avatar */
-    .member-marker::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-radius: 50%;
-      pointer-events: none;
-    }
-    .member-marker.lost::after { background: rgba(255, 152, 0, 0.3); }
-    .member-marker.no_signal::after { background: rgba(117, 117, 117, 0.4); }
-    .member-marker.lost_and_no_signal::after { background: rgba(255, 82, 82, 0.3); }
-
-    /* Warning triangle badge */
-    .warning-badge {
-      position: absolute;
-      top: -8px;
-      left: -8px;
-      z-index: 3;
-      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
-    }
-
-    /* Marker pointer triangle */
-    .marker-wrap { display: flex; flex-direction: column; align-items: center; }
-    .marker-triangle {
-      width: 0; height: 0;
-      border-left: 6px solid transparent;
-      border-right: 6px solid transparent;
-      border-top: 9px solid #FFFFFF;
-      margin-top: -2px;
-    }
-    .marker-triangle.lost { border-top-color: #FF9800; }
-    .marker-triangle.no_signal { border-top-color: #757575; }
-    .marker-triangle.lost_and_no_signal { border-top-color: #FF5252; }
-
-    /* Remove default maplibre controls */
-    .maplibregl-ctrl-group { display: none !important; }
-  </style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-  const GOONG_MAP_KEY = "${GOONG_MAP_KEY}";
-  const ROUTE_COORDS = ${routeGeoJSON};
-  const WAYPOINTS = ${waypointsJSON};
-  const MEMBERS = ${membersJSON};
-  const STATUS_CIRCLE_COLORS = ${STATUS_COLORS_JSON};
-
-  function styleUrl(file) {
-    return 'https://tiles.goong.io/assets/' + file + '?api_key=' + GOONG_MAP_KEY;
-  }
-
-  const map = new maplibregl.Map({
-    container: 'map',
-    style: styleUrl('goong_map_dark.json'),
-    zoom: ${mapZoom},
-    center: ${mapCenterStr},
-    attributionControl: false,
-  });
-
-  map.on('styledata', function() {
-    // Xoá viền trắng (stroke) của chữ trên bản đồ Goong triệt để
-    const layers = map.getStyle().layers;
-    if (layers) {
-      layers.forEach(layer => {
-        if (layer.type === 'symbol') {
-          try {
-            map.setPaintProperty(layer.id, 'text-halo-width', 0);
-            map.setPaintProperty(layer.id, 'text-halo-color', 'transparent');
-          } catch(e) {}
-        }
-      });
-    }
-  });
-
-  map.on('load', function() {
-    // ── Tuyến đường chính (màu R2D brown-orange) ──────────────────
-    map.addSource('route', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: ROUTE_COORDS }
-      }
-    });
-
-    // Shadow/glow bên dưới
-    map.addLayer({
-      id: 'route-glow',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#CD853F', 'line-width': 10, 'line-opacity': 0.25 }
-    });
-
-    // Tuyến chính
-    map.addLayer({
-      id: 'route-main',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#C87941', 'line-width': 4.5, 'line-opacity': 0.95 }
-    });
-
-    // Waypoint markers (điểm dừng)
-    WAYPOINTS.forEach(function(wp) {
-      const el = document.createElement('div');
-      el.style.cssText = [
-        'width:10px', 'height:10px', 'border-radius:50%',
-        'background:' + (wp.type === 'start' ? '#4CAF50' : wp.type === 'end' ? '#FF5252' : '#CD853F'),
-        'border:2.5px solid #fff',
-        'box-shadow:0 1px 4px rgba(0,0,0,0.4)',
-        'cursor:pointer',
-      ].join(';');
-      new maplibregl.Marker({ element: el })
-        .setLngLat(wp.lngLat)
-        .addTo(map);
-    });
-
-    // Member markers
-    MEMBERS.forEach(function(m) {
-      const wrap = document.createElement('div');
-      wrap.className = 'marker-wrap';
-
-      const markerDiv = document.createElement('div');
-      markerDiv.className = 'member-marker ' + m.status + (m.role === 'leader' ? ' leader' : '');
-
-      const img = document.createElement('img');
-      img.src = m.avatar;
-      img.alt = m.name;
-      markerDiv.appendChild(img);
-
-      // Đã xoá badge "Off Route" theo yêu cầu
-
-      // Tam giác cảnh báo đỏ máu nếu gặp vấn đề
-      if (m.status !== 'normal') {
-        const warnBadge = document.createElement('div');
-        warnBadge.className = 'warning-badge';
-        warnBadge.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#8B0000" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
-        markerDiv.appendChild(warnBadge);
-      }
-
-      const triangle = document.createElement('div');
-      triangle.className = 'marker-triangle ' + m.status;
-
-      wrap.appendChild(markerDiv);
-      wrap.appendChild(triangle);
-
-      // Tap marker → gửi message về RN
-      wrap.addEventListener('click', function() {
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MARKER_TAP', memberId: m.id }));
-        }
-      });
-
-      const marker = new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
-        .setLngLat(m.lngLat)
-        .addTo(map);
-
-      window.memberMarkers = window.memberMarkers || {};
-      window.memberMarkers[m.id] = marker;
-    });
-
-    const handleMessage = function(event) {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'UPDATE_POSITION' && window.memberMarkers[data.id]) {
-          window.memberMarkers[data.id].setLngLat([data.lng, data.lat]);
-          if (data.isMe) {
-            map.flyTo({ center: [data.lng, data.lat], speed: 0.5 });
-          }
-        }
-      } catch(e) {}
-    };
-
-    window.addEventListener('message', handleMessage);
-    document.addEventListener('message', handleMessage);
-  });
-</script>
-</body>
-</html>`;
-}
 
 // ------------------------------------------------------------------
 // Status helpers
@@ -492,7 +244,23 @@ const LiveTrackingScreen = () => {
   const normalCount = trip.members.filter((m) => m.status === 'normal').length;
   const alertCount = trip.members.length - normalCount;
 
-  const mapHTML = buildMapHTML(trip.members);
+  const mapWaypoints: MapWaypoint[] = trip.waypoints.map((wp) => ({
+    id: wp.id,
+    name: wp.name,
+    lng: wp.lngLat[0],
+    lat: wp.lngLat[1],
+    type: wp.type as 'start' | 'stop' | 'end',
+  }));
+
+  const mapMembers: MapMember[] = trip.members.map((m) => ({
+    id: m.id,
+    name: m.name,
+    avatar: m.avatar,
+    lng: m.lngLat[0],
+    lat: m.lngLat[1],
+    role: m.role,
+    status: m.status,
+  }));
 
   const currentTraveled = traveledKm > 0 ? traveledKm : trip.completedDistance;
   const progressPct = Math.min(100, Math.round((currentTraveled / trip.totalDistance) * 100));
@@ -501,18 +269,26 @@ const LiveTrackingScreen = () => {
     <View style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-      {/* ── BẢN ĐỒ (WebView) ── */}
+      {/* ── BẢN ĐỒ (SharedGoongMap) ── */}
       <View style={styles.mapContainer}>
-        <WebView
-          source={{ html: mapHTML }}
+        <SharedGoongMap
+          ref={webViewRef}
           style={styles.webview}
+          initialCenter={MOCK_TRIP.mapCenter}
+          initialZoom={MOCK_TRIP.mapZoom}
+          waypoints={mapWaypoints}
+          routeCoords={MOCK_TRIP.routePolylineCoords}
+          members={mapMembers}
+          onMarkerPress={(memberId) => {
+            const member = MOCK_TRIP.members.find((m) => m.id === memberId);
+            if (member) {
+              Alert.alert(
+                member.name,
+                `Trạng thái: ${STATUS_COLORS[member.status as MemberStatus].label}\n${member.locationDesc}`
+              );
+            }
+          }}
           onMessage={onWebViewMessage}
-          javaScriptEnabled
-          domStorageEnabled
-          originWhitelist={['*']}
-          scrollEnabled={false}
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
         />
 
         {/* OVERLAY: SafeAreaView cho các button */}

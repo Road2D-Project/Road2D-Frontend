@@ -82,11 +82,12 @@ apiClient.interceptors.response.use(
       if (!refreshToken) throw new Error('NO_REFRESH_TOKEN');
 
       // Dùng axios thuần (không qua apiClient) để tránh interceptor lặp.
-      const res = await axios.post<{ access_token: string }>(
+      const res = await axios.post<{ access_token?: string; accessToken?: string }>(
         `${API_BASE_URL}/auth/user/refresh`,
-        { refresh_token: refreshToken },
+        { refreshToken, refresh_token: refreshToken },
       );
-      const newAccess = res.data.access_token;
+      const newAccess = res.data?.accessToken || res.data?.access_token;
+      if (!newAccess) throw new Error('EMPTY_REFRESH_RESPONSE');
       await tokenStorage.saveTokens(newAccess, refreshToken);
 
       flushWaiters(newAccess);

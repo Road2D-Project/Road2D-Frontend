@@ -9,7 +9,7 @@
  * [step 4] Xác nhận → hiện invite link + QR code mock
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, CreateTripScreenNavigationProp } from '../../types/navigation';
 import { useTripStore } from '../../store/useTripStore';
@@ -139,12 +139,25 @@ const stepStyles = StyleSheet.create({
 
 const CreateTripScreen = () => {
   const navigation = useNavigation<CreateTripScreenNavigationProp>();
+  const route = useRoute<any>();
 
   // Navigation state
   const [step, setStep] = useState(0); // 0-3
 
   // Step 1 state
   const [selectedRoute, setSelectedRoute] = useState<typeof MOCK_ROUTES[0] | null>(null);
+
+  // Lắng nghe lộ trình vừa tạo từ CreateRouteScreen
+  useEffect(() => {
+    if (route.params?.customRoute) {
+      const cr = route.params.customRoute;
+      setSelectedRoute(cr);
+      if (!tripName) {
+        setTripName(cr.name);
+      }
+      setStep(1); // Tự động chuyển sang bước Thiết lập chuyến đi
+    }
+  }, [route.params?.customRoute]);
 
   // Step 1 state
   const [tripName, setTripName] = useState('');
@@ -166,7 +179,6 @@ const CreateTripScreen = () => {
   const [isCreating, setIsCreating] = useState(false);
   const currentTripId = useTripStore((s: any) => s.currentTripId);
   const createTrip = useTripStore((s: any) => s.createTrip);
-  const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 
   // ── Navigation helpers ──
   const goNext = () => setStep((s) => Math.min(s + 1, 3));
@@ -200,24 +212,8 @@ const CreateTripScreen = () => {
         coverImage: selectedRoute.image,
       };
       const trip = await createTrip(payload);
-
-      // Sau khi tạo trip, xin invite link từ backend (nếu có tripId thật)
-      let inviteCode = (trip as any).inviteCode ?? '';
-      if (!inviteCode && trip?.id && API_URL) {
-        try {
-          const linkRes = await fetch(`${API_URL}/trips/${trip.id}/invite-link`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-          });
-          if (linkRes.ok) {
-            const linkData = await linkRes.json();
-            inviteCode = linkData.token ?? '';
-          }
-        } catch { /* backend chưa sẵn sàng, dùng mock */ }
-      }
-      // Fallback mock code nếu chưa có
-      if (!inviteCode) inviteCode = 'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
-
+      // Mã mời / invite token đã được tripService xử lý chuẩn với backend
+      const inviteCode = (trip as any)?.inviteCode || 'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
       setCreatedInviteCode(inviteCode);
       setStep(3);
     } catch (e) {

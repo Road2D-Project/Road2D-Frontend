@@ -14,6 +14,25 @@ import type { CreateTripPayload, Trip } from '../../types';
 const genInviteCode = () =>
   'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
 
+function mapBackendTripToFrontend(b: any): Trip {
+  return {
+    id: b.id,
+    name: b.name,
+    routeId: b.id,
+    routeName: b.name,
+    distanceKm: Math.round((b.totalDistance || 0) / 1000) || b.totalDistance || 0,
+    status: (b.status?.toUpperCase() || 'PLANNING') as any,
+    startAt: b.startTime || b.createdTime || new Date().toISOString(),
+    vehicle: 'Xe máy',
+    maxMembers: b.memberLimit || 15,
+    isPublic: !!b.visibility,
+    note: b.note || '',
+    inviteCode: '',
+    leaderId: b.ownerId,
+    members: [],
+  };
+}
+
 const tripService = {
   /** GET /trips */
   getTrips: async (): Promise<Trip[]> => {
@@ -21,9 +40,10 @@ const tripService = {
       await delay(500);
       return [...mockDb.trips];
     }
-    // TODO BACKEND: GET /trips
-    const res = await apiClient.get<Trip[]>('/trips');
-    return res.data;
+    // GET /v1/trips -> trả về { trips: TripResponse[] }
+    const res = await apiClient.get<any>('/trips');
+    const list = Array.isArray(res.data) ? res.data : (res.data?.trips ?? []);
+    return list.map(mapBackendTripToFrontend);
   },
 
   /** GET /trips/:id */
@@ -32,9 +52,29 @@ const tripService = {
       await delay(300);
       return mockDb.trips.find((t) => t.id === id);
     }
-    // TODO BACKEND: GET /trips/:id
-    const res = await apiClient.get<Trip>(`/trips/${id}`);
-    return res.data;
+    // GET /v1/trips/:tripId
+    const res = await apiClient.get<any>(`/trips/${id}`);
+    const trip = mapBackendTripToFrontend(res.data);
+    try {
+      const membersRes = await apiClient.get<any>(`/trips/${id}/members`);
+      const membersList = Array.isArray(membersRes.data)
+        ? membersRes.data
+        : (membersRes.data?.members ?? []);
+      if (Array.isArray(membersList)) {
+        trip.members = membersList.map((m: any) => ({
+          userId: m.userId,
+          name: m.nickname ?? m.username ?? m.name ?? m.userId,
+          avatar: m.avatar ?? '',
+          role: (m.role?.toUpperCase() || 'RIDER') as any,
+          nickname: m.nickname,
+          status: m.status,
+          accepted: m.status === 'active' || m.membershipStatus === 'active',
+        }));
+      }
+    } catch {
+      // Bỏ qua nếu không lấy được members
+    }
+    return trip;
   },
 
   /** POST /trips */
@@ -69,12 +109,42 @@ const tripService = {
       mockDb.trips.unshift(trip);
       return trip;
     }
-    // TODO BACKEND: POST /trips
-    const res = await apiClient.post<Trip>('/trips', payload);
-    return res.data;
+    // POST /v1/trips (CreateTripRequest)
+    const validUuidIds = payload.invitedUserIds?.filter((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    );
+    const bePayload: any = {
+      name: payload.name,
+      note: payload.note || '',
+      tripType: 'bronze',
+      visibility: !!payload.isPublic,
+      memberUserIds: validUuidIds && validUuidIds.length > 0 ? validUuidIds : [MOCK_CURRENT_USER.id],
+    };
+    if (payload.startAt) {
+      try {
+        bePayload.startTime = new Date(payload.startAt).toISOString();
+      } catch {
+        // Fallback
+      }
+    }
+
+    const res = await apiClient.post<any>('/trips', bePayload);
+    const trip = mapBackendTripToFrontend(res.data);
+
+    // Lấy invite link token qua POST /v1/trips/:tripId/invite-link
+    try {
+      const linkRes = await apiClient.post<any>(`/trips/${res.data.id}/invite-link`);
+      if (linkRes.data?.token) {
+        trip.inviteCode = linkRes.data.token;
+      }
+    } catch {
+      trip.inviteCode = genInviteCode();
+    }
+
+    return trip;
   },
 
-  /** POST /trips/join  { inviteCode } */
+  /** POST /trips/join/:token */
   joinTrip: async (inviteCode: string): Promise<Trip> => {
     if (USE_MOCK) {
       await delay(700);
@@ -82,9 +152,9 @@ const tripService = {
       if (!trip) throw { response: { status: 404, data: { message: 'Mã mời không tồn tại.' } } };
       return trip;
     }
-    // TODO BACKEND: POST /trips/join
-    const res = await apiClient.post<Trip>('/trips/join', { inviteCode });
-    return res.data;
+    const token = inviteCode.includes('/') ? inviteCode.split('/').pop()! : inviteCode.trim();
+    const res = await apiClient.post<any>(`/trips/join/${token}`);
+    return mapBackendTripToFrontend(res.data);
   },
 
   /** POST /trips/:id/leave */
@@ -94,7 +164,6 @@ const tripService = {
       mockDb.trips = mockDb.trips.filter((t) => t.id !== id);
       return;
     }
-    // TODO BACKEND: POST /trips/:id/leave
     await apiClient.post(`/trips/${id}/leave`);
   },
 };

@@ -1,11 +1,18 @@
 /**
  * route.ts — Domain types cho tuyến đường (Route), điểm dừng (Stopover), toạ độ.
+ * Hỗ trợ cả chuẩn React Native Maps và schema Graph/Planning của Backend.
  */
 
 /** Toạ độ theo chuẩn react-native-maps. */
 export interface LatLng {
   latitude: number;
   longitude: number;
+}
+
+/** Toạ độ theo chuẩn Backend (module/maps/model/LatLng.go). */
+export interface BackendLatLng {
+  lat: number;
+  lng: number;
 }
 
 export type DifficultyLevel = 'EASY' | 'MEDIUM' | 'HARD' | 'EXTREME';
@@ -33,4 +40,44 @@ export interface Route {
   stopovers: Stopover[];
   /** Polyline [lng, lat][] của cả tuyến */
   polyline: [number, number][];
+}
+
+// ─── Backend Planning & Location Models (module/trip/model/response/...) ───
+
+export interface PreviewLocation {
+  locationId: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+export interface ComputeBranchStop {
+  name: string;
+  destinationId?: string;
+  locationId?: string;
+}
+
+export interface ComputeBranchLeg {
+  from: ComputeBranchStop;
+  to: ComputeBranchStop;
+  vehicle: 'bike' | 'car' | 'truck' | 'taxi' | 'hd';
+  polyline: string;
+  distanceM: number;
+  durationS: number;
+}
+
+export interface PreviewLocationsResponse {
+  locations: PreviewLocation[];
+  legs: ComputeBranchLeg[];
+}
+
+export interface BackendLocation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  address?: string;
+  formattedAddress?: string;
+  placeId?: string;
+  isVerified: boolean;
 }

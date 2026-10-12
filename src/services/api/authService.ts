@@ -84,9 +84,15 @@ const authService = {
         created_at: new Date().toISOString(),
       };
     }
-    // TODO BACKEND: GET /auth/user/me
-    const response = await apiClient.get<UserProfile>('/auth/user/me');
-    return response.data;
+    // POST /v1/auth/user/me
+    const response = await apiClient.get<any>('/auth/user/me');
+    const u = response.data;
+    return {
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      created_at: u.createdAt || u.created_at || new Date().toISOString(),
+    };
   },
 
   /**
@@ -95,8 +101,11 @@ const authService = {
    */
   logout: async (refreshToken: string): Promise<void> => {
     if (USE_MOCK) return;
-    // TODO BACKEND: POST /auth/user/logout
-    await apiClient.post('/auth/user/logout', { refresh_token: refreshToken });
+    // Backend LogoutRequest expects { refreshToken: string }
+    await apiClient.post('/auth/user/logout', {
+      refreshToken,
+      refresh_token: refreshToken,
+    });
   },
 
   /**
@@ -105,11 +114,14 @@ const authService = {
    */
   refreshToken: async (refreshToken: string): Promise<{ access_token: string }> => {
     if (USE_MOCK) return { access_token: 'mock_access_token' };
-    // TODO BACKEND: POST /auth/user/refresh
-    const response = await apiClient.post<{ access_token: string }>('/auth/user/refresh', {
+    // Backend RefreshRequest expects { refreshToken: string }
+    const response = await apiClient.post<any>('/auth/user/refresh', {
+      refreshToken,
       refresh_token: refreshToken,
     });
-    return response.data;
+    return {
+      access_token: response.data?.accessToken || response.data?.access_token || '',
+    };
   },
 
   /**

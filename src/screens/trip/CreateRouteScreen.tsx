@@ -1,22 +1,16 @@
 /**
  * CreateRouteScreen.tsx
  *
- * Phase 0 — Chọn Điểm Đầu & Điểm Cuối (search Goong Autocomplete)
+ * Phase 0 — Chọn Điểm Đầu & Điểm Cuối (search Goong Autocomplete qua Backend)
  * Phase 1 — Thêm Điểm Dừng giữa (tuỳ chọn)
- * Phase 2 — Xem lộ trình thật (gọi GET /goong/directions A→B cho từng hop)
+ * Phase 2 — Xem lộ trình thật (gọi GET /v1/goong/directions qua Backend)
  *
- * Routing Phase 2:
- *   - Gọi trực tiếp Goong Directions REST API (GOONG_REST_KEY) cho từng cặp điểm liên tiếp
- *   - Giải mã polyline → tập hợp coordinates → vẽ lên MapLibre (dark style như LiveTracking)
- *   - Hiển thị tổng km + thời gian ước tính
- *
- * Gợi ý tích hợp backend thật (sau khi BE catalog có API):
- *   1. POST /goong/geocode hoặc place detail để upsert Location trên BE → lấy locationId
- *   2. POST /planning/preview với locationIds[] → nhận polyline + legs chính xác
- *   3. Pass PreviewLocationsResponse vào CreateTripScreen làm mainBranch
+ * Bản đồ:
+ *   - Sử dụng SharedGoongMap chuẩn tông màu nâu đậm sang trọng, đồng bộ thương hiệu Road2D.
+ *   - Gọi API qua backend proxy với X-Playground-Key để bảo vệ an toàn GOONG_REST_KEY.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -35,215 +29,33 @@ import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { useNavigation } from '@react-navigation/native';
 import type { CreateRouteScreenNavigationProp } from '../../types/navigation';
+import { SharedGoongMap, MapWaypoint } from '../../components/map/SharedGoongMap';
+import {
+  goongMapService,
+  PlacePrediction,
+  PlaceDetail,
+  RouteLegResult,
+} from '../../services/api/goongMapService';
 
-// ─── Brand colors (theo LiveTrackingScreen) ───────────────────────────────────
+// ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
-  primary:     '#CD8554',
+  primary: '#CD8554',
   primaryDark: '#A85A32',
-  heading:     '#5D3A29',
-  text:        '#3E2723',
-  sub:         '#6D4C41',
-  bg:          '#FDFBF7',
-  card:        '#FFFFFF',
-  border:      '#E0D5CC',
-  success:     '#4CAF50',
-  danger:      '#FF5252',
-  mapBg:       '#3E2B1C',       // nền WebView khi map chưa load (giống LiveTracking)
-  mapDark:     '#2C1A10',       // container bên ngoài WebView
+  heading: '#5D3A29',
+  text: '#3E2723',
+  sub: '#6D4C41',
+  bg: '#FDFBF7',
+  card: '#FFFFFF',
+  border: '#E0D5CC',
+  success: '#4CAF50',
+  danger: '#FF5252',
+  mapBg: '#241810',
+  mapDark: '#1A110B',
 };
 
-const GOONG_REST_KEY = process.env.EXPO_PUBLIC_GOONG_REST_API_KEY ?? '';
-const GOONG_MAP_KEY  = process.env.EXPO_PUBLIC_GOONG_MAP_KEY ?? '';
-const API_URL        = process.env.EXPO_PUBLIC_API_URL ?? '';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface Prediction {
-  place_id: string;
-  description: string;
-}
-
-interface Waypoint {
-  place_id: string;
-  name: string;
-  address: string;
-  lat: number;
-  lng: number;
-}
-
-interface RouteLeg {
-  coords: [number, number][];  // [lng, lat][]
-  distanceM: number;
-  durationS: number;
-}
-
+type Waypoint = PlaceDetail;
+type RouteLeg = RouteLegResult;
 type Phase = 0 | 1 | 2;
-
-// ─── Goong REST helpers ───────────────────────────────────────────────────────
-async function goongAutocomplete(input: string, location?: string): Promise<Prediction[]> {
-  if (!input.trim() || !GOONG_REST_KEY) return [];
-  try {
-    const p = new URLSearchParams({ input, api_key: GOONG_REST_KEY, limit: '7' });
-    if (location) p.set('location', location);
-    const res = await fetch(`https://rsapi.goong.io/Place/AutoComplete?${p}`);
-    const json = await res.json();
-    return (json.predictions ?? []) as Prediction[];
-  } catch { return []; }
-}
-
-async function goongPlaceDetail(place_id: string): Promise<Waypoint | null> {
-  try {
-    const p = new URLSearchParams({ place_id, api_key: GOONG_REST_KEY });
-    const res = await fetch(`https://rsapi.goong.io/Place/Detail?${p}`);
-    const json = await res.json();
-    const r = json.result;
-    if (!r) return null;
-    return {
-      place_id,
-      lat: r.geometry?.location?.lat ?? 0,
-      lng: r.geometry?.location?.lng ?? 0,
-      name: r.name ?? r.formatted_address ?? '',
-      address: r.formatted_address ?? '',
-    };
-  } catch { return null; }
-}
-
-/**
- * Giải mã Google/Goong encoded polyline → [[lng,lat],...]
- */
-function decodePolyline(encoded: string): [number, number][] {
-  const coords: [number, number][] = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b, shift = 0, result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : result >> 1;
-    shift = 0; result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : result >> 1;
-    coords.push([lng / 1e5, lat / 1e5]);
-  }
-  return coords;
-}
-
-/**
- * Gọi Goong Directions REST cho 1 hop A→B, trả về coords + metrics.
- */
-async function fetchRouteLeg(from: Waypoint, to: Waypoint): Promise<RouteLeg | null> {
-  try {
-    const p = new URLSearchParams({
-      origin: `${from.lat},${from.lng}`,
-      destination: `${to.lat},${to.lng}`,
-      vehicle: 'bike',
-      api_key: GOONG_REST_KEY,
-    });
-    const res = await fetch(`https://rsapi.goong.io/Direction?${p}`);
-    const json = await res.json();
-    const route = json.routes?.[0];
-    if (!route) return null;
-    const leg = route.legs?.[0];
-    const polylineStr = route.overview_polyline?.points ?? '';
-    const coords = decodePolyline(polylineStr);
-    return {
-      coords,
-      distanceM: leg?.distance?.value ?? 0,
-      durationS: leg?.duration?.value ?? 0,
-    };
-  } catch { return null; }
-}
-
-// ─── Map HTML (MapLibre dark, giống LiveTrackingScreen) ───────────────────────
-function buildMapHTML(waypoints: Waypoint[], legs: RouteLeg[], showRoute: boolean): string {
-  const center = waypoints.length > 0
-    ? [waypoints[0].lng, waypoints[0].lat]
-    : [105.8542, 21.0285];
-
-  // Gộp tất cả coords từ các legs thành 1 LineString
-  const allCoords = legs.flatMap(l => l.coords);
-  const routeGeoJSON = JSON.stringify(allCoords);
-
-  const waypointsJS = waypoints.map((wp, i) => {
-    const isFirst = i === 0;
-    const isLast  = i === waypoints.length - 1 && waypoints.length > 1;
-    const color   = isFirst ? '#4CAF50' : isLast ? '#FF5252' : '#CD853F';
-    const label   = isFirst ? 'A' : isLast ? 'B' : String(i);
-    return `
-      (function(){
-        var el = document.createElement('div');
-        el.style.cssText = 'width:28px;height:28px;border-radius:50%;background:${color};border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:11px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5)';
-        el.textContent = '${label}';
-        new maplibregl.Marker({ element: el }).setLngLat([${wp.lng},${wp.lat}]).addTo(map);
-      })();`;
-  }).join('\n');
-
-  const routeLayerJS = showRoute && allCoords.length >= 2 ? `
-    map.addSource('route', {
-      type: 'geojson',
-      data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: ${routeGeoJSON} } }
-    });
-    // Glow
-    map.addLayer({ id: 'route-glow', type: 'line', source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#CD853F', 'line-width': 10, 'line-opacity': 0.25 }
-    });
-    // Main route
-    map.addLayer({ id: 'route-main', type: 'line', source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#C87941', 'line-width': 4.5, 'line-opacity': 0.95 }
-    });
-  ` : '';
-
-  const fitBoundsJS = waypoints.length >= 2 ? `
-    var bounds = new maplibregl.LngLatBounds();
-    ${waypoints.map(wp => `bounds.extend([${wp.lng},${wp.lat}]);`).join('\n')}
-    map.fitBounds(bounds, { padding: 60, maxZoom: 13 });
-  ` : '';
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; overflow: hidden; background: #3E2B1C; }
-    #map { width: 100%; height: 100%; }
-    /* Tông màu nâu-cam chủ đạo giống LiveTrackingScreen */
-    .maplibregl-canvas {
-      filter: sepia(0.3) hue-rotate(-10deg) saturate(1.2) brightness(1.25) contrast(1.05);
-    }
-    .maplibregl-ctrl-group { display: none !important; }
-  </style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-  var map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://tiles.goong.io/assets/goong_map_dark.json?api_key=${GOONG_MAP_KEY}',
-    center: [${center[0]},${center[1]}],
-    zoom: ${waypoints.length > 1 ? 9 : 12},
-    attributionControl: false,
-  });
-  map.on('styledata', function() {
-    var layers = map.getStyle()?.layers ?? [];
-    layers.forEach(function(layer) {
-      if (layer.type === 'symbol') {
-        try { map.setPaintProperty(layer.id, 'text-halo-width', 0); } catch(e){}
-        try { map.setPaintProperty(layer.id, 'text-halo-color', 'transparent'); } catch(e){}
-      }
-    });
-  });
-  map.on('load', function() {
-    ${routeLayerJS}
-    ${waypointsJS}
-    ${fitBoundsJS}
-  });
-</script>
-</body>
-</html>`;
-}
 
 // ─── Search Box Component ─────────────────────────────────────────────────────
 interface SearchBoxProps {
@@ -253,34 +65,44 @@ interface SearchBoxProps {
   onSelect: (wp: Waypoint) => void;
   onClear: () => void;
   biasLocation?: string;
-  autoFocusOnMount?: boolean;
+  onFocus?: () => void;
 }
 
 const SearchBox: React.FC<SearchBoxProps> = ({
-  placeholder, dotColor, value, onSelect, onClear, biasLocation,
+  placeholder,
+  dotColor,
+  value,
+  onSelect,
+  onClear,
+  biasLocation,
+  onFocus,
 }) => {
-  const [query, setQuery]               = useState('');
-  const [predictions, setPredictions]   = useState<Prediction[]>([]);
-  const [loading, setLoading]           = useState(false);
-  const [focused, setFocused]           = useState(false);
+  const [query, setQuery] = useState('');
+  const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleChange = (text: string) => {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!text.trim()) { setPredictions([]); return; }
+    if (!text.trim() || text.trim().length < 2) {
+      setPredictions([]);
+      return;
+    }
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
-      setPredictions(await goongAutocomplete(text, biasLocation));
+      const results = await goongMapService.searchPlaces(text, biasLocation);
+      setPredictions(results);
       setLoading(false);
     }, 400);
   };
 
-  const handleSelect = async (pred: Prediction) => {
+  const handleSelect = async (pred: PlacePrediction) => {
     setLoading(true);
     Keyboard.dismiss();
     setFocused(false);
-    const detail = await goongPlaceDetail(pred.place_id);
+    const detail = await goongMapService.getPlaceDetail(pred.place_id);
     setLoading(false);
     if (!detail) return;
     setPredictions([]);
@@ -293,10 +115,17 @@ const SearchBox: React.FC<SearchBoxProps> = ({
       <View style={sb.selectedRow}>
         <View style={[sb.dot, { backgroundColor: dotColor }]} />
         <View style={sb.selectedText}>
-          <Text style={sb.selectedName} numberOfLines={1}>{value.name}</Text>
-          <Text style={sb.selectedAddr} numberOfLines={1}>{value.address}</Text>
+          <Text style={sb.selectedName} numberOfLines={1} ellipsizeMode="tail">
+            {value.name}
+          </Text>
+          <Text style={sb.selectedAddr} numberOfLines={1} ellipsizeMode="tail">
+            {value.address}
+          </Text>
         </View>
-        <TouchableOpacity onPress={onClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          onPress={onClear}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="close-circle" size={20} color={C.border} />
         </TouchableOpacity>
       </View>
@@ -313,29 +142,51 @@ const SearchBox: React.FC<SearchBoxProps> = ({
           onChangeText={handleChange}
           placeholder={placeholder}
           placeholderTextColor={C.border}
-          onFocus={() => setFocused(true)}
-          onBlur={() => { if (!predictions.length) setFocused(false); }}
+          onFocus={() => {
+            setFocused(true);
+            onFocus?.();
+          }}
+          onBlur={() => {
+            if (!predictions.length) setFocused(false);
+          }}
           returnKeyType="search"
         />
-        {loading
-          ? <ActivityIndicator size="small" color={C.primary} style={{ marginLeft: 6 }} />
-          : query.length > 0
-            ? <TouchableOpacity onPress={() => { setQuery(''); setPredictions([]); }}>
-                <Ionicons name="close" size={16} color={C.sub} />
-              </TouchableOpacity>
-            : null
-        }
+        {loading ? (
+          <ActivityIndicator size="small" color={C.primary} style={{ marginLeft: 6 }} />
+        ) : query.length > 0 ? (
+          <TouchableOpacity
+            onPress={() => {
+              setQuery('');
+              setPredictions([]);
+            }}
+          >
+            <Ionicons name="close" size={16} color={C.sub} />
+          </TouchableOpacity>
+        ) : null}
       </View>
-      {/* Dropdown xuất hiện BÊN DƯỚI input, không che input */}
+
+      {/* Dropdown gợi ý render bên dưới input */}
       {predictions.length > 0 && (
         <View style={sb.dropdown}>
           {predictions.map((p) => (
-            <TouchableOpacity key={p.place_id} style={sb.predItem} onPress={() => handleSelect(p)}>
-              <Ionicons name="location-outline" size={15} color={C.primary} style={{ flexShrink: 0, marginRight: 8 }} />
+            <TouchableOpacity
+              key={p.place_id}
+              style={sb.predItem}
+              onPress={() => handleSelect(p)}
+            >
+              <Ionicons
+                name="location-outline"
+                size={15}
+                color={C.primary}
+                style={{ flexShrink: 0, marginRight: 8 }}
+              />
               <View style={{ flex: 1 }}>
-                <Text style={sb.predName} numberOfLines={1}>{p.description.split(',')[0]}</Text>
+                <Text style={sb.predName} numberOfLines={1}>
+                  {p.structured_formatting?.main_text ?? p.description.split(',')[0]}
+                </Text>
                 <Text style={sb.predAddr} numberOfLines={1}>
-                  {p.description.split(',').slice(1).join(',').trim()}
+                  {p.structured_formatting?.secondary_text ??
+                    p.description.split(',').slice(1).join(',').trim()}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -347,137 +198,248 @@ const SearchBox: React.FC<SearchBoxProps> = ({
 };
 
 const sb = StyleSheet.create({
-  selectedRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.card, borderRadius: 12,
-    borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 12, paddingVertical: 10,
-    gap: 10, marginBottom: 8,
-  },
-  dot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
-  selectedText: { flex: 1, minWidth: 0 },        // minWidth:0 → text tự co lại
-  selectedName: { fontSize: 14, fontWeight: '700', color: C.text, flexShrink: 1 },
-  selectedAddr: { fontSize: 12, color: C.sub, marginTop: 1, flexShrink: 1 },
   inputRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.card, borderRadius: 12,
-    borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 12, paddingVertical: 10,
-    gap: 8, marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F3EE',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 6,
   },
-  inputRowFocused: { borderColor: C.primary },
-  input: { flex: 1, fontSize: 14, color: C.text, minWidth: 0, padding: 0 },
+  inputRowFocused: {
+    borderColor: C.primary,
+    backgroundColor: '#FFFFFF',
+  },
+  dot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    marginRight: 9,
+    flexShrink: 0,
+  },
+  input: {
+    flex: 1,
+    fontSize: 14,
+    color: C.text,
+    padding: 0,
+    minWidth: 0,
+  },
+  selectedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F3EE',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: C.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+  },
+  selectedText: {
+    flex: 1,
+    marginRight: 8,
+    minWidth: 0,
+  },
+  selectedName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  selectedAddr: {
+    fontSize: 11,
+    color: C.sub,
+    marginTop: 1,
+  },
   dropdown: {
-    backgroundColor: C.card, borderRadius: 12,
-    borderWidth: 1, borderColor: C.border,
-    marginTop: -4, marginBottom: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
     overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1, shadowRadius: 8, elevation: 6,
+    marginBottom: 8,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   predItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#F3EDE7',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5EFE9',
   },
-  predName: { fontSize: 14, fontWeight: '600', color: C.text },
-  predAddr: { fontSize: 12, color: C.sub, marginTop: 1 },
+  predName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.heading,
+  },
+  predAddr: {
+    fontSize: 11,
+    color: C.sub,
+    marginTop: 1,
+  },
 });
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function fmtDistance(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
-}
-function fmtDuration(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return `${h}h ${m}p`;
-  return `${m} phút`;
-}
-
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-const CreateRouteScreen: React.FC = () => {
+export const CreateRouteScreen: React.FC = () => {
   const navigation = useNavigation<CreateRouteScreenNavigationProp>();
   const webviewRef = useRef<WebView>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
-  const [phase, setPhase]             = useState<Phase>(0);
-  const [origin, setOrigin]           = useState<Waypoint | null>(null);
+  const [phase, setPhase] = useState<Phase>(0);
+  const [origin, setOrigin] = useState<Waypoint | null>(null);
   const [destination, setDestination] = useState<Waypoint | null>(null);
-  const [stops, setStops]             = useState<Waypoint[]>([]);
+  const [stops, setStops] = useState<Waypoint[]>([]);
 
   // Stop search state
-  const [stopQuery, setStopQuery]           = useState('');
-  const [stopPreds, setStopPreds]           = useState<Prediction[]>([]);
-  const [stopLoading, setStopLoading]       = useState(false);
+  const [stopQuery, setStopQuery] = useState('');
+  const [stopPreds, setStopPreds] = useState<PlacePrediction[]>([]);
+  const [stopLoading, setStopLoading] = useState(false);
   const stopDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Phase 2: routing
-  const [legs, setLegs]               = useState<RouteLeg[]>([]);
+  const [legs, setLegs] = useState<RouteLeg[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
 
-  const allWaypoints: Waypoint[] = [
+  const allWaypoints: Waypoint[] = useMemo(() => [
     ...(origin ? [origin] : []),
     ...stops,
     ...(destination ? [destination] : []),
-  ];
+  ], [origin, stops, destination]);
+
   const canProceed = !!origin && !!destination;
-  const mapHtml    = buildMapHTML(allWaypoints, legs, phase === 2);
+
+  // Chuyển waypoints sang format của SharedGoongMap
+  const mapWaypoints: MapWaypoint[] = useMemo(() => {
+    return allWaypoints.map((wp, i) => {
+      const isFirst = i === 0;
+      const isLast = i === allWaypoints.length - 1 && allWaypoints.length > 1;
+      return {
+        id: wp.place_id,
+        name: wp.name,
+        lat: wp.lat,
+        lng: wp.lng,
+        label: isFirst ? 'A' : isLast ? 'B' : String(i),
+        type: isFirst ? 'start' : isLast ? 'end' : 'stop',
+      };
+    });
+  }, [allWaypoints]);
+
+  // Danh sách toạ độ tuyến đường
+  const routeCoords = useMemo(() => {
+    return phase === 2 ? legs.flatMap((l) => l.coords) : [];
+  }, [phase, legs]);
 
   // ── Stop search ──
-  const handleStopQuery = useCallback((text: string) => {
-    setStopQuery(text);
-    if (stopDebounceRef.current) clearTimeout(stopDebounceRef.current);
-    if (!text.trim()) { setStopPreds([]); return; }
-    stopDebounceRef.current = setTimeout(async () => {
-      setStopLoading(true);
-      const bias = origin ? `${origin.lat},${origin.lng}` : undefined;
-      setStopPreds(await goongAutocomplete(text, bias));
-      setStopLoading(false);
-    }, 400);
-  }, [origin]);
+  const handleStopQuery = useCallback(
+    (text: string) => {
+      setStopQuery(text);
+      if (stopDebounceRef.current) clearTimeout(stopDebounceRef.current);
+      if (!text.trim() || text.trim().length < 2) {
+        setStopPreds([]);
+        return;
+      }
+      stopDebounceRef.current = setTimeout(async () => {
+        setStopLoading(true);
+        const bias = origin ? `${origin.lat},${origin.lng}` : undefined;
+        const results = await goongMapService.searchPlaces(text, bias);
+        setStopPreds(results);
+        setStopLoading(false);
+      }, 400);
+    },
+    [origin]
+  );
 
-  const addStop = useCallback(async (pred: Prediction) => {
+  const addStop = useCallback(async (pred: PlacePrediction) => {
     setStopLoading(true);
     Keyboard.dismiss();
-    const detail = await goongPlaceDetail(pred.place_id);
+    const detail = await goongMapService.getPlaceDetail(pred.place_id);
     setStopLoading(false);
     if (!detail) return;
-    setStops(prev => [...prev, detail]);
+    setStops((prev) => [...prev, detail]);
     setStopQuery('');
     setStopPreds([]);
   }, []);
 
-  // ── Phase 2: fetch real route ──
+  // ── Phase 2: fetch route qua Backend ──
   const fetchRoute = useCallback(async () => {
     setRouteLoading(true);
     setLegs([]);
     const pts = allWaypoints;
     const results: RouteLeg[] = [];
+
     for (let i = 0; i < pts.length - 1; i++) {
-      const leg = await fetchRouteLeg(pts[i], pts[i + 1]);
-      results.push(leg ?? { coords: [[pts[i].lng, pts[i].lat], [pts[i+1].lng, pts[i+1].lat]], distanceM: 0, durationS: 0 });
+      const leg = await goongMapService.getDirections(
+        { lat: pts[i].lat, lng: pts[i].lng },
+        { lat: pts[i + 1].lat, lng: pts[i + 1].lng },
+        'bike'
+      );
+      results.push(
+        leg ?? {
+          coords: [
+            [pts[i].lng, pts[i].lat],
+            [pts[i + 1].lng, pts[i + 1].lat],
+          ],
+          distanceM: 0,
+          durationS: 0,
+        }
+      );
     }
+
     setLegs(results);
     setRouteLoading(false);
     setPhase(2);
   }, [allWaypoints]);
 
-  // ── CTA ──
+  // ── CTA Helpers ──
   const getCtaLabel = () => {
     if (phase === 0) return canProceed ? 'Tiếp theo: Thêm điểm dừng' : 'Chọn điểm đầu & điểm đến';
     if (phase === 1) return routeLoading ? 'Đang tính lộ trình...' : 'Xem lộ trình';
     return 'Xác nhận lộ trình';
   };
+
   const ctaDisabled = (phase === 0 && !canProceed) || routeLoading;
 
-  const handleCta = () => {
-    if (phase === 0 && canProceed) setPhase(1);
-    else if (phase === 1 && !routeLoading) fetchRoute();
-    else if (phase === 2) navigation.goBack();
+  const totalDist = legs.reduce((s, l) => s + l.distanceM, 0);
+  const totalDur = legs.reduce((s, l) => s + l.durationS, 0);
+
+  const fmtDistance = (m: number) =>
+    m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
+  const fmtDuration = (s: number) => {
+    const mins = Math.round(s / 60);
+    if (mins < 60) return `${mins} phút`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h} giờ ${m > 0 ? `${m}p` : ''}`;
   };
 
-  const totalDist = legs.reduce((s, l) => s + l.distanceM, 0);
-  const totalDur  = legs.reduce((s, l) => s + l.durationS, 0);
+  const handleCta = () => {
+    if (phase === 0 && canProceed) {
+      setPhase(1);
+    } else if (phase === 1 && !routeLoading) {
+      fetchRoute();
+    } else if (phase === 2) {
+      // Chuyển kết quả lộ trình sang wizard CreateTrip
+      const customRoute = {
+        id: 'route_' + Date.now(),
+        name: `${origin?.name} → ${destination?.name}`,
+        distance: fmtDistance(totalDist),
+        duration: fmtDuration(totalDur),
+        stops: stops.length,
+        image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
+        waypoints: allWaypoints,
+        polylineCoords: routeCoords,
+      };
+      (navigation as any).navigate('CreateTrip', { customRoute });
+    }
+  };
 
   // ── Phase panels ──
   const renderPhase0 = () => (
@@ -489,6 +451,7 @@ const CreateRouteScreen: React.FC = () => {
         value={origin}
         onSelect={setOrigin}
         onClear={() => setOrigin(null)}
+        onFocus={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
       />
       <View style={styles.divLine} />
       <Text style={styles.panelLabel}>ĐIỂM ĐẾN</Text>
@@ -499,11 +462,12 @@ const CreateRouteScreen: React.FC = () => {
         onSelect={setDestination}
         onClear={() => setDestination(null)}
         biasLocation={origin ? `${origin.lat},${origin.lng}` : undefined}
+        onFocus={() => scrollRef.current?.scrollTo({ y: 140, animated: true })}
       />
       {!canProceed && (
         <View style={styles.hintRow}>
           <Ionicons name="information-circle-outline" size={15} color={C.sub} />
-          <Text style={styles.hintText}>Chọn đủ 2 điểm để tiếp tục</Text>
+          <Text style={styles.hintText}>Chọn đủ điểm đầu và điểm cuối để tiếp tục</Text>
         </View>
       )}
     </View>
@@ -515,18 +479,22 @@ const CreateRouteScreen: React.FC = () => {
       <View style={styles.routeSummary}>
         <View style={[styles.chip, { backgroundColor: '#E8F5E9' }]}>
           <Ionicons name="radio-button-on" size={13} color={C.success} />
-          <Text style={[styles.chipText, { color: '#2E7D32' }]} numberOfLines={1}>{origin!.name}</Text>
+          <Text style={[styles.chipText, { color: '#2E7D32' }]} numberOfLines={1}>
+            {origin?.name}
+          </Text>
         </View>
         <Ionicons name="chevron-forward" size={14} color={C.sub} />
         <View style={[styles.chip, { backgroundColor: '#FFEBEE' }]}>
           <Ionicons name="location" size={13} color={C.danger} />
-          <Text style={[styles.chipText, { color: '#C62828' }]} numberOfLines={1}>{destination!.name}</Text>
+          <Text style={[styles.chipText, { color: '#C62828' }]} numberOfLines={1}>
+            {destination?.name}
+          </Text>
         </View>
       </View>
 
-      <Text style={styles.panelLabel}>ĐIỂM DỪNG GIỮA ĐƯỜNG</Text>
+      <Text style={styles.panelLabel}>ĐIỂM DỪNG DỌC ĐƯỜNG (TUỲ CHỌN)</Text>
       <Text style={styles.panelHint}>
-        💡 Chọn ít nhất một điểm dừng để khám phá thêm nhiều điểm thú vị dọc đường — hoặc bỏ qua và xem lộ trình ngay!
+        💡 Thêm các trạm dừng chân hoặc quán ăn yêu thích dọc tuyến đường của bạn.
       </Text>
 
       {stops.map((s, i) => (
@@ -535,11 +503,17 @@ const CreateRouteScreen: React.FC = () => {
             <Text style={styles.stopBadgeText}>{i + 1}</Text>
           </View>
           <View style={styles.stopInfo}>
-            <Text style={styles.stopName} numberOfLines={1}>{s.name}</Text>
-            <Text style={styles.stopAddr} numberOfLines={1}>{s.address}</Text>
+            <Text style={styles.stopName} numberOfLines={1}>
+              {s.name}
+            </Text>
+            <Text style={styles.stopAddr} numberOfLines={1}>
+              {s.address}
+            </Text>
           </View>
-          <TouchableOpacity onPress={() => setStops(prev => prev.filter((_, j) => j !== i))}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={() => setStops((prev) => prev.filter((_, j) => j !== i))}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Ionicons name="trash-outline" size={18} color={C.primary} />
           </TouchableOpacity>
         </View>
@@ -552,20 +526,36 @@ const CreateRouteScreen: React.FC = () => {
           style={[sb.input, { marginLeft: 6 }]}
           value={stopQuery}
           onChangeText={handleStopQuery}
+          onFocus={() => scrollRef.current?.scrollToEnd({ animated: true })}
           placeholder="Thêm điểm dừng..."
           placeholderTextColor={C.border}
           returnKeyType="search"
         />
         {stopLoading && <ActivityIndicator size="small" color={C.primary} />}
       </View>
+
       {stopPreds.length > 0 && (
-        <View style={[sb.dropdown, { marginTop: 0 }]}>
-          {stopPreds.map(p => (
-            <TouchableOpacity key={p.place_id} style={sb.predItem} onPress={() => addStop(p)}>
-              <Ionicons name="location-outline" size={15} color={C.primary} style={{ flexShrink: 0, marginRight: 8 }} />
+        <View style={sb.dropdown}>
+          {stopPreds.map((p) => (
+            <TouchableOpacity
+              key={p.place_id}
+              style={sb.predItem}
+              onPress={() => addStop(p)}
+            >
+              <Ionicons
+                name="location-outline"
+                size={15}
+                color={C.primary}
+                style={{ marginRight: 8 }}
+              />
               <View style={{ flex: 1 }}>
-                <Text style={sb.predName} numberOfLines={1}>{p.description.split(',')[0]}</Text>
-                <Text style={sb.predAddr} numberOfLines={1}>{p.description.split(',').slice(1).join(',').trim()}</Text>
+                <Text style={sb.predName} numberOfLines={1}>
+                  {p.structured_formatting?.main_text ?? p.description.split(',')[0]}
+                </Text>
+                <Text style={sb.predAddr} numberOfLines={1}>
+                  {p.structured_formatting?.secondary_text ??
+                    p.description.split(',').slice(1).join(',').trim()}
+                </Text>
               </View>
             </TouchableOpacity>
           ))}
@@ -576,13 +566,13 @@ const CreateRouteScreen: React.FC = () => {
 
   const renderPhase2 = () => (
     <View style={styles.panel}>
-      {/* Route metrics */}
+      {/* Metric strip */}
       {totalDist > 0 && (
-        <View style={styles.metricsRow}>
+        <View style={styles.metricStrip}>
           <View style={styles.metricItem}>
-            <MaterialCommunityIcons name="map-marker-distance" size={18} color={C.primary} />
+            <Ionicons name="bicycle" size={18} color={C.primary} />
             <Text style={styles.metricVal}>{fmtDistance(totalDist)}</Text>
-            <Text style={styles.metricLbl}>Khoảng cách</Text>
+            <Text style={styles.metricLbl}>Quãng đường</Text>
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metricItem}>
@@ -599,24 +589,31 @@ const CreateRouteScreen: React.FC = () => {
         </View>
       )}
 
-      <Text style={styles.panelLabel}>LỘ TRÌNH</Text>
+      <Text style={styles.panelLabel}>LỘ TRÌNH ĐÃ TÍNH TOÁN</Text>
 
       {allWaypoints.map((wp, i) => (
         <View key={wp.place_id + i} style={styles.routeRow}>
           <View style={styles.routeLeft}>
-            <View style={[styles.routeDot,
-              i === 0 && { backgroundColor: C.success },
-              i === allWaypoints.length - 1 && { backgroundColor: C.danger },
-              i > 0 && i < allWaypoints.length - 1 && { backgroundColor: C.primary },
-            ]} />
+            <View
+              style={[
+                styles.routeDot,
+                i === 0 && { backgroundColor: C.success },
+                i === allWaypoints.length - 1 && { backgroundColor: C.danger },
+                i > 0 && i < allWaypoints.length - 1 && { backgroundColor: C.primary },
+              ]}
+            />
             {i < allWaypoints.length - 1 && <View style={styles.routeConnector} />}
           </View>
           <View style={styles.routeInfo}>
             <Text style={styles.routeLabel}>
               {i === 0 ? 'XUẤT PHÁT' : i === allWaypoints.length - 1 ? 'ĐIỂM ĐẾN' : `TRẠM ${i}`}
             </Text>
-            <Text style={styles.routeName} numberOfLines={1}>{wp.name}</Text>
-            <Text style={styles.routeAddr} numberOfLines={1}>{wp.address}</Text>
+            <Text style={styles.routeName} numberOfLines={1}>
+              {wp.name}
+            </Text>
+            <Text style={styles.routeAddr} numberOfLines={1}>
+              {wp.address}
+            </Text>
             {legs[i] && i < allWaypoints.length - 1 && (
               <Text style={styles.legInfo}>
                 ↓ {fmtDistance(legs[i].distanceM)} · {fmtDuration(legs[i].durationS)}
@@ -625,17 +622,6 @@ const CreateRouteScreen: React.FC = () => {
           </View>
         </View>
       ))}
-
-      {/* Routing note */}
-      <View style={styles.noteBanner}>
-        <MaterialCommunityIcons name="check-circle-outline" size={15} color={C.success} />
-        <Text style={styles.noteText}>
-          Lộ trình tính bằng Goong Directions API (xe máy){'\n'}
-          <Text style={{ color: C.sub }}>
-            Tích hợp backend: gọi POST /planning/preview với locationIds sau khi geocode → lấy polyline chính xác hơn
-          </Text>
-        </Text>
-      </View>
 
       <TouchableOpacity style={styles.editBtn} onPress={() => setPhase(1)}>
         <Feather name="edit-2" size={14} color={C.primary} />
@@ -658,7 +644,10 @@ const CreateRouteScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => { if (phase > 0) setPhase((phase - 1) as Phase); else navigation.goBack(); }}
+          onPress={() => {
+            if (phase > 0) setPhase((phase - 1) as Phase);
+            else navigation.goBack();
+          }}
         >
           <Ionicons name="arrow-back" size={22} color={C.heading} />
         </TouchableOpacity>
@@ -668,49 +657,53 @@ const CreateRouteScreen: React.FC = () => {
 
       {/* Phase progress bar */}
       <View style={styles.phaseBar}>
-        {([0, 1, 2] as Phase[]).map(p => (
-          <View key={p} style={[styles.phaseSegment, p <= phase && styles.phaseSegmentActive]} />
+        {([0, 1, 2] as Phase[]).map((p) => (
+          <View
+            key={p}
+            style={[styles.phaseSegment, p <= phase && styles.phaseSegmentActive]}
+          />
         ))}
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-
-        {/* Map (dark theme giống LiveTrackingScreen) */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {/* Bản đồ với style sáng mặc định của Goong */}
         <View style={styles.mapWrap}>
-          <WebView
+          <SharedGoongMap
             ref={webviewRef}
-            source={{ html: mapHtml }}
             style={styles.webview}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={['*']}
-            scrollEnabled={false}
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
+            waypoints={mapWaypoints}
+            routeCoords={routeCoords}
+            variant="default"
           />
           {/* Badge on map */}
           <View style={styles.mapBadge} pointerEvents="none">
             <Text style={styles.mapBadgeText}>
-              {phase === 0 ? 'Dùng thanh tìm kiếm bên dưới'
-                : phase === 1 ? 'Thêm điểm dừng · bấm "Xem lộ trình" khi xong'
-                : routeLoading ? 'Đang tính lộ trình...'
-                : `Lộ trình Goong · ${fmtDistance(totalDist)}`}
+              {phase === 0
+                ? 'Tìm kiếm điểm đầu và đích bên dưới'
+                : phase === 1
+                  ? 'Thêm điểm dừng · bấm "Xem lộ trình" khi xong'
+                  : routeLoading
+                    ? 'Đang tính lộ trình qua Backend...'
+                    : `Lộ trình Road2D · ${fmtDistance(totalDist)}`}
             </Text>
           </View>
           {routeLoading && (
             <View style={styles.routeLoader}>
               <ActivityIndicator color={C.primary} size="large" />
-              <Text style={styles.routeLoaderText}>Đang tính lộ trình xe máy...</Text>
+              <Text style={styles.routeLoaderText}>Đang tính lộ trình xe máy qua backend...</Text>
             </View>
           )}
         </View>
 
-        {/* Bottom panel — scrollable */}
+        {/* Bottom panel */}
         <ScrollView
+          ref={scrollRef}
           style={styles.scroll}
-          contentContainerStyle={{ paddingBottom: 90 }}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 220 }]}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
         >
           {phase === 0 && renderPhase0()}
           {phase === 1 && renderPhase1()}
@@ -726,18 +719,21 @@ const CreateRouteScreen: React.FC = () => {
           disabled={ctaDisabled}
           activeOpacity={ctaDisabled ? 1 : 0.85}
         >
-          {routeLoading
-            ? <ActivityIndicator color="#FFF" />
-            : <>
-                <Text style={styles.ctaText}>{getCtaLabel()}</Text>
-                {!ctaDisabled && (
-                  <Ionicons
-                    name={phase === 2 ? 'checkmark' : 'arrow-forward'}
-                    size={18} color="#FFF" style={{ marginLeft: 8 }}
-                  />
-                )}
-              </>
-          }
+          {routeLoading ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <>
+              <Text style={styles.ctaText}>{getCtaLabel()}</Text>
+              {!ctaDisabled && (
+                <Ionicons
+                  name={phase === 2 ? 'checkmark' : 'arrow-forward'}
+                  size={18}
+                  color="#FFF"
+                  style={{ marginLeft: 8 }}
+                />
+              )}
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -747,136 +743,304 @@ const CreateRouteScreen: React.FC = () => {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: {
-    flex: 1, backgroundColor: C.bg,
+    flex: 1,
+    backgroundColor: C.bg,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 13,
-    backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    backgroundColor: C.bg,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
   },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#F0E8E0', justifyContent: 'center', alignItems: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F0E8E0',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: C.heading },
-
-  phaseBar: { flexDirection: 'row', gap: 4, paddingHorizontal: 20, paddingVertical: 7, backgroundColor: C.bg },
-  phaseSegment: { flex: 1, height: 3, borderRadius: 2, backgroundColor: '#E8DDD5' },
-  phaseSegmentActive: { backgroundColor: C.primary },
-
-  // Map — dark theme giống LiveTracking
-  mapWrap: { height: 260, backgroundColor: C.mapDark, position: 'relative' },
-  webview: { flex: 1, backgroundColor: C.mapBg },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  phaseBar: {
+    flexDirection: 'row',
+    height: 3,
+    backgroundColor: C.border,
+  },
+  phaseSegment: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  phaseSegmentActive: {
+    backgroundColor: C.primary,
+  },
+  mapWrap: {
+    height: 250,
+    backgroundColor: C.mapDark,
+    position: 'relative',
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: C.mapBg,
+  },
   mapBadge: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(28,17,8,0.82)',
-    paddingVertical: 8, alignItems: 'center',
-    borderTopWidth: 1, borderTopColor: 'rgba(205,133,84,0.2)',
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(36,24,16,0.85)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(205,133,84,0.4)',
   },
-  mapBadgeText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
+  mapBadgeText: {
+    color: '#FDFBF7',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   routeLoader: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(28,17,8,0.75)',
-    justifyContent: 'center', alignItems: 'center', gap: 12,
+    backgroundColor: 'rgba(36,24,16,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  routeLoaderText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
-
-  scroll: { flex: 1 },
-  panel: { padding: 16 },
+  routeLoaderText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  panel: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
   panelLabel: {
-    fontSize: 11, fontWeight: '700', color: C.sub,
-    letterSpacing: 0.8, marginBottom: 8, marginTop: 4,
+    fontSize: 11,
+    fontWeight: '800',
+    color: C.sub,
+    letterSpacing: 0.8,
+    marginBottom: 8,
   },
   panelHint: {
-    fontSize: 13, color: C.sub, marginBottom: 12, lineHeight: 18,
-    backgroundColor: '#FDF6EE', borderRadius: 10, padding: 10,
-    borderWidth: 1, borderColor: '#EDD9C3',
+    fontSize: 12,
+    color: C.sub,
+    marginBottom: 12,
+    lineHeight: 17,
   },
-  divLine: { height: 1, backgroundColor: C.border, marginVertical: 10, marginHorizontal: 4 },
-  hintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  hintText: { fontSize: 12, color: C.sub },
-
-  // Phase 0 summary chips
-  routeSummary: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
+  divLine: {
+    height: 1,
+    backgroundColor: C.border,
+    marginVertical: 10,
+  },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  hintText: {
+    fontSize: 12,
+    color: C.sub,
+  },
+  routeSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+    flexWrap: 'wrap',
+  },
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, maxWidth: 140,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    maxWidth: '44%',
   },
-  chipText: { fontSize: 12, fontWeight: '700', flexShrink: 1 },
-
-  // Phase 1 — stops
+  chipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   stopRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.card, borderRadius: 12,
-    borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 12, paddingVertical: 10,
-    marginBottom: 8, gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5EFE9',
+    gap: 10,
   },
   stopBadge: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center', flexShrink: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: C.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  stopBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
-  stopInfo: { flex: 1, minWidth: 0 },
-  stopName: { fontSize: 14, fontWeight: '600', color: C.text, flexShrink: 1 },
-  stopAddr: { fontSize: 11, color: C.sub, marginTop: 1, flexShrink: 1 },
-
-  // Phase 2 — route display
-  metricsRow: {
-    flexDirection: 'row', backgroundColor: C.card,
-    borderRadius: 14, borderWidth: 1, borderColor: C.border,
-    paddingVertical: 14, marginBottom: 16,
+  stopBadgeText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
-  metricItem: { flex: 1, alignItems: 'center', gap: 3 },
-  metricDivider: { width: 1, backgroundColor: C.border, marginVertical: 4 },
-  metricVal: { fontSize: 16, fontWeight: '800', color: C.heading },
-  metricLbl: { fontSize: 10, color: C.sub, fontWeight: '600' },
-
-  routeRow: { flexDirection: 'row', marginBottom: 2 },
-  routeLeft: { width: 30, alignItems: 'center', paddingTop: 3 },
+  stopInfo: {
+    flex: 1,
+  },
+  stopName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.heading,
+  },
+  stopAddr: {
+    fontSize: 11,
+    color: C.sub,
+    marginTop: 1,
+  },
+  metricStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EE',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  metricItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  metricVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: C.heading,
+  },
+  metricLbl: {
+    fontSize: 10,
+    color: C.sub,
+  },
+  metricDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: C.border,
+  },
+  routeRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  routeLeft: {
+    alignItems: 'center',
+    width: 20,
+    marginRight: 10,
+    paddingTop: 3,
+  },
   routeDot: {
-    width: 14, height: 14, borderRadius: 7, backgroundColor: C.primary,
-    borderWidth: 2, borderColor: '#FFF',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
-  routeConnector: { width: 2, flex: 1, backgroundColor: C.border, marginTop: 3 },
-  routeInfo: { flex: 1, paddingLeft: 8, paddingBottom: 16 },
-  routeLabel: { fontSize: 10, fontWeight: '700', color: C.sub, letterSpacing: 0.5 },
-  routeName: { fontSize: 15, fontWeight: '700', color: C.text, marginTop: 1 },
-  routeAddr: { fontSize: 11, color: C.sub, marginTop: 1 },
-  legInfo: { fontSize: 11, color: C.primary, fontWeight: '600', marginTop: 3 },
-
-  noteBanner: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: '#F0FBF0', borderRadius: 10,
-    borderWidth: 1, borderColor: '#C8E6C9',
-    padding: 10, marginTop: 4, marginBottom: 10,
+  routeConnector: {
+    width: 2,
+    flex: 1,
+    backgroundColor: C.border,
+    marginVertical: 3,
+    minHeight: 28,
   },
-  noteText: { flex: 1, fontSize: 12, color: '#2E7D32', lineHeight: 17 },
-
+  routeInfo: {
+    flex: 1,
+    paddingBottom: 12,
+  },
+  routeLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: C.sub,
+    letterSpacing: 0.6,
+  },
+  routeName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.heading,
+    marginTop: 1,
+  },
+  routeAddr: {
+    fontSize: 11,
+    color: C.sub,
+    marginTop: 1,
+  },
+  legInfo: {
+    fontSize: 11,
+    color: C.primary,
+    fontWeight: '600',
+    marginTop: 4,
+  },
   editBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 12,
-    borderWidth: 1, borderColor: C.primary, borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.primary,
+    marginTop: 12,
   },
-  editBtnText: { fontSize: 14, fontWeight: '600', color: C.primary },
-
-  // CTA
+  editBtnText: {
+    fontSize: 13,
+    color: C.primary,
+    fontWeight: '600',
+  },
   ctaBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.bg, paddingHorizontal: 20, paddingVertical: 13,
-    borderTopWidth: 1, borderTopColor: C.border,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: C.card,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
   },
   ctaBtn: {
-    backgroundColor: C.primary, borderRadius: 16, height: 54,
-    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
-    shadowColor: C.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35, shadowRadius: 8, elevation: 5,
+    backgroundColor: C.primary,
+    borderRadius: 14,
+    height: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: C.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  ctaBtnOff: { backgroundColor: '#E0D5CC', shadowOpacity: 0, elevation: 0 },
-  ctaText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  ctaBtnOff: {
+    backgroundColor: C.border,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  ctaText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
 });
 
 export default CreateRouteScreen;
