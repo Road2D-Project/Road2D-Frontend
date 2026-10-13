@@ -155,9 +155,9 @@ const AllUpcomingTripsScreen = () => {
                       trip.coverImage ||
                       'https://images.unsplash.com/photo-1549880181-56a44cf4a9a5?q=80&w=600',
                   }}
-                  style={[StyleSheet.absoluteFillObject, { borderRadius: 14 }]}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
                 />
-                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.48)', borderRadius: 14 }]} />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.48)', borderRadius: 14 }]} />
 
                 <View style={styles.upcomingTopRow}>
                   <View style={styles.upcomingInfoLeft}>
@@ -169,27 +169,27 @@ const AllUpcomingTripsScreen = () => {
                       <Text style={styles.dateText}>{formatTripDate(trip.startAt)}</Text>
                     </View>
                   </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      isActive
-                        ? { backgroundColor: C.success }
-                        : isLocked
-                        ? { backgroundColor: '#795548' }
-                        : { backgroundColor: C.warning },
-                    ]}
-                  >
-                    <Text style={styles.statusPillText}>
-                      {isActive ? 'ĐANG DIỄN RA' : isLocked ? 'ĐÃ CHỐT' : 'KẾ HOẠCH'}
-                    </Text>
-                  </View>
+                  {(isActive || isLocked) && (
+                    <View
+                      style={[
+                        styles.statusPill,
+                        isActive
+                          ? { backgroundColor: C.success }
+                          : { backgroundColor: '#795548' },
+                      ]}
+                    >
+                      <Text style={styles.statusPillText}>
+                        {isActive ? 'ĐANG DIỄN RA' : 'ĐÃ CHỐT'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 <View style={styles.upcomingBottomRow}>
                   <View style={styles.bottomMetaRow}>
                     <Feather name="users" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
                     <Text style={styles.bottomMetaText}>
-                      {trip.members?.length || 1}/{trip.maxMembers} thành viên
+                      {Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers} thành viên
                     </Text>
                     <Text style={styles.bottomMetaDivider}>•</Text>
                     <MaterialCommunityIcons name="motorbike" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
@@ -198,7 +198,7 @@ const AllUpcomingTripsScreen = () => {
 
                   <View style={styles.distanceRow}>
                     <MaterialCommunityIcons name="map-marker-path" size={16} color="#EAEAEA" />
-                    <Text style={styles.distanceText}>{trip.distanceKm} km</Text>
+                    <Text style={styles.distanceText}>{trip.distanceKm > 0 ? trip.distanceKm : 15} km</Text>
                   </View>
                 </View>
               </TouchableOpacity>

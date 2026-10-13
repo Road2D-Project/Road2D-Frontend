@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
     backgroundColor: BRAND.mapBg,
   },
   loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: BRAND.mapBg,
     alignItems: 'center',
     justifyContent: 'center',

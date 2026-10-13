@@ -4,11 +4,13 @@
  */
 import { create } from 'zustand';
 import tripService from '../services/api/tripService';
+import { registerOnForceLogout } from '../services/api';
 import type { CreateTripPayload, Trip } from '../types';
 
 export interface TripState {
   trips: Trip[];
   loading: boolean;
+  hasFetched: boolean;
   error: string | null;
   /** Trip vừa tạo / đang xem (dùng truyền sang TeamRoster, LiveTracking) */
   currentTripId: string | null;
@@ -29,7 +31,8 @@ export interface TripState {
 
 export const useTripStore = create<TripState>()((set, get) => ({
   trips: [],
-  loading: false,
+  loading: true,
+  hasFetched: false,
   error: null,
   currentTripId: null,
   draft: {},
@@ -38,9 +41,9 @@ export const useTripStore = create<TripState>()((set, get) => ({
     set({ loading: true, error: null });
     try {
       const trips = await tripService.getTrips();
-      set({ trips, loading: false });
+      set({ trips, loading: false, hasFetched: true });
     } catch (e: any) {
-      set({ loading: false, error: e?.response?.data?.message ?? 'Không tải được danh sách trip.' });
+      set({ loading: false, hasFetched: true, error: e?.response?.data?.message ?? 'Không tải được danh sách trip.' });
     }
   },
 
@@ -87,8 +90,11 @@ export const useTripStore = create<TripState>()((set, get) => ({
   clearDraft: () => set({ draft: {} }),
   updateTripStatus: (id, status) =>
     set({ trips: get().trips.map((t) => (t.id === id ? { ...t, status } : t)) }),
-  reset: () => set({ trips: [], currentTripId: null, draft: {}, error: null }),
+  reset: () => set({ trips: [], currentTripId: null, draft: {}, error: null, loading: false, hasFetched: false }),
 }));
+
+// Tự động reset store khi phiên đăng nhập bị thu hồi (tránh require cycle)
+registerOnForceLogout(() => useTripStore.getState().reset());
 
 /** Selector tiện dụng. */
 export const selectUpcomingTrips = (s: TripState) =>

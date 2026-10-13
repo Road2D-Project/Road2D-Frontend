@@ -233,13 +233,13 @@ const PostMenu = ({
     }
   }, [visible]);
 
-  if (!visible && opacityAnim._value === 0) return null;
+  if (!visible && (opacityAnim as any)._value === 0) return null;
 
   return (
     <>
       {/* Invisible backdrop to close */}
       <TouchableOpacity
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         onPress={onClose}
         activeOpacity={1}
       />
@@ -906,7 +906,7 @@ const styles = StyleSheet.create({
 
   // Modal base
   modalOverlay: { flex: 1, justifyContent: 'flex-end' },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)' },
 
   // Comment Sheet
   commentSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, height: '75%', paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 16 },

@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   coverContainer: { width: '100%', height: 200, position: 'relative' },
   coverImage: { width: '100%', height: '100%' },
   coverGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(30,10,0,0.25)',
   },
   settingsOverlay: {

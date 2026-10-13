@@ -278,7 +278,7 @@ const ScanQRScreen = () => {
 
       {/* Camera Fullscreen */}
       <CameraView
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         facing="back"
         enableTorch={torch}
         barcodeScannerSettings={{
@@ -288,7 +288,7 @@ const ScanQRScreen = () => {
       />
 
       {/* Mask tối màu xung quanh khung quét */}
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         {/* Vùng tối phía trên */}
         <View style={[styles.maskTop, { height: (SCREEN_HEIGHT - SCAN_BOX_SIZE) / 2 - 40 }]} />
 
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
 
   // ── Processing Overlay ──
   processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     alignItems: 'center',
     justifyContent: 'center',

@@ -47,56 +47,41 @@ const C = {
   success: '#4CAF50',
 };
 
-// ─── Mock data ─────────────────────────────────────────────────────────────────
+import Svg, { Path, Circle } from 'react-native-svg';
 
-const MOCK_ROUTES = [
-  {
-    id: 'r1',
-    name: 'Hà Giang Loop',
-    distance: '350 km',
-    stops: 6,
-    // Ảnh từ Picsum (stable, không cần referral)
-    image: 'https://picsum.photos/seed/hagiang/600/300',
-  },
-  {
-    id: 'r2',
-    name: 'Tà Xùa Săn Mây',
-    distance: '285 km',
-    stops: 4,
-    image: 'https://picsum.photos/seed/taxua/600/300',
-  },
-  {
-    id: 'r3',
-    name: 'Trảng Bom — Đà Lạt',
-    distance: '300 km',
-    stops: 5,
-    image: 'https://picsum.photos/seed/dalat/600/300',
-  },
-  {
-    id: 'r4',
-    name: 'Cung Đường Tây Bắc',
-    distance: '850 km',
-    stops: 10,
-    image: 'https://picsum.photos/seed/taybac/600/300',
-  },
-];
+const VEHICLES = ['Xe máy'] as const;
 
-const MOCK_FRIENDS = [
-  { id: 'f1', name: 'Tuấn Đạt', username: '@tuan.dat', avatar: 'https://picsum.photos/seed/user1/100/100' },
-  { id: 'f2', name: 'Thu Hà', username: '@thu.ha', avatar: 'https://picsum.photos/seed/user2/100/100' },
-  { id: 'f3', name: 'Minh Trang', username: '@minh.trang', avatar: 'https://picsum.photos/seed/user3/100/100' },
-  { id: 'f4', name: 'Hoài Nam', username: '@hoai.nam', avatar: 'https://picsum.photos/seed/user4/100/100' },
-  { id: 'f5', name: 'Thanh Trúc', username: '@thanh.truc', avatar: 'https://picsum.photos/seed/user5/100/100' },
-  { id: 'f6', name: 'Bảo Long', username: '@bao.long', avatar: 'https://picsum.photos/seed/user6/100/100' },
-];
+// Huy chương gói: Dây đeo màu nâu app (#CD8554) của nút '+', đĩa bên dưới phân biệt màu Bronze/Silver/Gold
+const MedalBadge = ({ tier }: { tier: 'bronze' | 'silver' | 'gold' }) => {
+  const ribbonColor = '#CD8554'; // Màu nâu app chuẩn
+  const medalColor = tier === 'gold' ? '#FFD700' : tier === 'silver' ? '#D1D5DB' : '#CD7F32';
+  const strokeColor = tier === 'gold' ? '#D97706' : tier === 'silver' ? '#9CA3AF' : '#92400E';
 
-const VEHICLES = ['Xe đạp', 'Xe máy', 'Ô tô'] as const;
+  return (
+    <View style={{ width: 34, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
+      <Svg width="30" height="36" viewBox="0 0 30 36" fill="none">
+        {/* Dây đeo huy chương màu nâu app (#CD8554) */}
+        <Path d="M6 2 L15 16 L11 16 L3 2 Z" fill={ribbonColor} />
+        <Path d="M24 2 L15 16 L19 16 L27 2 Z" fill={ribbonColor} />
+        <Path d="M11 13 L15 19 L19 13 Z" fill="#A85A32" />
+
+        {/* Đĩa huy chương bên dưới phân biệt màu sắc */}
+        <Circle cx="15" cy="24" r="10" fill={medalColor} stroke={strokeColor} strokeWidth="1.5" />
+        <Circle cx="15" cy="24" r="7.5" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1" />
+        <Path
+          d="M15 19.8 L16.3 22.8 L19.5 23.2 L17.2 25.4 L17.8 28.5 L15 27 L12.2 28.5 L12.8 25.4 L10.5 23.2 L13.7 22.8 Z"
+          fill="#FFFFFF"
+        />
+      </Svg>
+    </View>
+  );
+};
 
 // Trip type — backend dùng để tính member limit
 const TRIP_TYPES = [
-  { key: 'bronze', label: 'Bronze', desc: 'Tối đa 15 người', icon: '🥉' },
-  { key: 'silver', label: 'Silver', desc: 'Tối đa 30 người', icon: '🥈' },
-  { key: 'gold', label: 'Gold', desc: 'Tối đa 50 người', icon: '🥇' },
+  { key: 'bronze', label: 'Bronze', desc: 'Tối đa 15 người' },
+  { key: 'silver', label: 'Silver', desc: 'Tối đa 30 người' },
+  { key: 'gold', label: 'Gold', desc: 'Tối đa 50 người' },
 ] as const;
 type TripTypeKey = typeof TRIP_TYPES[number]['key'];
 
@@ -220,6 +205,19 @@ const CreateTripScreen = () => {
     else setStep((s) => s - 1);
   };
 
+  // Custom alert modal theo phong cách ScanQR
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    type: 'notice' | 'error';
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: 'notice',
+    title: '',
+    message: '',
+  });
+
   const toggleFriend = (id: string) => {
     setSelectedFriends((prev) =>
       prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
@@ -229,19 +227,26 @@ const CreateTripScreen = () => {
   const handleCreate = async () => {
     if (!selectedRoute) return;
     if (selectedFriends.length === 0) {
-      Alert.alert(
-        'Chưa chọn bạn bè',
-        'Theo quy định hệ thống, chuyến đi cần có ít nhất 1 bạn bè cùng tham gia. Vui lòng chọn ít nhất 1 bạn từ danh sách.'
-      );
+      setAlertModal({
+        visible: true,
+        type: 'notice',
+        title: 'Chưa chọn bạn bè',
+        message:
+          'Theo quy định hệ thống, chuyến đi cần có ít nhất 1 bạn bè cùng tham gia. Vui lòng chọn ít nhất 1 bạn từ danh sách.',
+      });
       return;
     }
     setIsCreating(true);
     try {
+      const realDist = selectedRoute.distanceM
+        ? Math.round((selectedRoute.distanceM / 1000) * 10) / 10
+        : (parseFloat(selectedRoute.distance) || selectedRoute.distanceKm || 0);
+
       const payload = {
         name: tripName || selectedRoute.name,
         routeId: selectedRoute.id,
         routeName: selectedRoute.name,
-        distanceKm: parseInt(selectedRoute.distance) || selectedRoute.distanceKm || 0,
+        distanceKm: realDist,
         startAt: new Date().toISOString(),
         vehicle: vehicle as any,
         tripType,
@@ -258,7 +263,12 @@ const CreateTripScreen = () => {
       setStep(3);
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || 'Không thể tạo chuyến đi.';
-      Alert.alert('Lỗi tạo chuyến đi', msg);
+      setAlertModal({
+        visible: true,
+        type: 'error',
+        title: 'Lỗi tạo chuyến đi',
+        message: msg,
+      });
     } finally {
       setIsCreating(false);
     }
@@ -645,7 +655,7 @@ const CreateTripScreen = () => {
               style={[styles.tripTypeBtn, tripType === t.key && styles.tripTypeBtnActive]}
               onPress={() => setTripType(t.key)}
             >
-              <Text style={styles.tripTypeIcon}>{t.icon}</Text>
+              <MedalBadge tier={t.key} />
               <Text style={[styles.tripTypeLabel, tripType === t.key && styles.tripTypeLabelActive]}>
                 {t.label}
               </Text>
@@ -1123,6 +1133,45 @@ const CreateTripScreen = () => {
             </View>
           </View>
         </Modal>
+
+        {/* Custom Styled Alert Modal (ScanQR Style) */}
+        <Modal
+          visible={alertModal.visible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAlertModal((prev) => ({ ...prev, visible: false }))}
+        >
+          <View style={styles.customAlertBackdrop}>
+            <View style={styles.customAlertBox}>
+              <View
+                style={[
+                  styles.customAlertIconCircle,
+                  alertModal.type === 'error' && { backgroundColor: '#FFEBEE' },
+                ]}
+              >
+                <Ionicons
+                  name={alertModal.type === 'error' ? 'alert-circle' : 'information-circle'}
+                  size={46}
+                  color={alertModal.type === 'error' ? '#D32F2F' : C.primary}
+                />
+              </View>
+
+              <Text style={styles.customAlertTitle}>{alertModal.title}</Text>
+              <Text style={styles.customAlertMessage}>{alertModal.message}</Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.customAlertBtn,
+                  alertModal.type === 'error' && { backgroundColor: '#D32F2F' },
+                ]}
+                onPress={() => setAlertModal((prev) => ({ ...prev, visible: false }))}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.customAlertBtnText}>Đã hiểu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   };
@@ -1192,12 +1241,12 @@ const CreateTripScreen = () => {
       borderColor: C.primary,
     },
     routeCardImage: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       width: '100%',
       height: '100%',
     },
     routeCardOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: 'rgba(0,0,0,0.45)',
     },
     routeSelectedBadge: {
@@ -2034,6 +2083,71 @@ const CreateTripScreen = () => {
     modalTripMeta: {
       fontSize: 12,
       color: C.sub,
+    },
+
+    // ── Custom Alert Modal (ScanQR Style) ──
+    customAlertBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 28,
+    },
+    customAlertBox: {
+      backgroundColor: C.card,
+      borderRadius: 22,
+      paddingVertical: 28,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+      width: '100%',
+      maxWidth: 340,
+      ...Platform.select({
+        ios: {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 10,
+        },
+        android: {
+          elevation: 6,
+        },
+      }),
+    },
+    customAlertIconCircle: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: '#FDF1E8',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    customAlertTitle: {
+      fontSize: 19,
+      fontWeight: '700',
+      color: C.heading,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    customAlertMessage: {
+      fontSize: 15,
+      color: C.sub,
+      textAlign: 'center',
+      lineHeight: 22,
+      marginBottom: 24,
+    },
+    customAlertBtn: {
+      backgroundColor: C.primary,
+      paddingVertical: 13,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+    },
+    customAlertBtnText: {
+      color: '#FFF',
+      fontSize: 15.5,
+      fontWeight: '700',
     },
   });
 

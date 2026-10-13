@@ -1,7 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import tokenStorage from '../storage/tokenStorage';
 import { useAuthStore } from '../../store/useAuthStore';
-import { useTripStore } from '../../store/useTripStore';
 import { API_BASE_URL, USE_MOCK } from '../../config/env';
 
 const apiClient = axios.create({
@@ -43,11 +42,22 @@ const flushWaiters = (token: string | null) => {
   waiters = [];
 };
 
+let onForceLogoutCallbacks: Array<() => void> = [];
+export const registerOnForceLogout = (cb: () => void) => {
+  onForceLogoutCallbacks.push(cb);
+};
+
 /** Xoá toàn bộ phiên đăng nhập → AppNavigator (auth guard) sẽ đưa về Login. */
 const forceLogout = async () => {
   await tokenStorage.clearTokens();
   useAuthStore.getState().logout();
-  useTripStore.getState().reset();
+  onForceLogoutCallbacks.forEach((cb) => {
+    try {
+      cb();
+    } catch {
+      // ignore
+    }
+  });
 };
 
 apiClient.interceptors.response.use(

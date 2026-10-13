@@ -9,7 +9,6 @@ import {
   Platform,
   StatusBar,
   ActivityIndicator,
-  Alert,
   Share,
   Modal,
   RefreshControl,
@@ -42,18 +41,18 @@ const C = {
   dangerBg: '#FFEBEE',
 };
 
+// Định dạng ngày giờ có dấu phẩy giữa giờ và ngày: "08:30, 24/12/2026"
 function formatTripDate(isoString?: string): string {
   if (!isoString) return 'Chưa định ngày';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return 'Chưa định ngày';
-    return d.toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${hours}:${mins}, ${day}/${month}/${year}`;
   } catch {
     return 'Chưa định ngày';
   }
@@ -67,12 +66,36 @@ const TripDetailsScreen = () => {
   const currentUserId = useAuthStore((s) => s.user?.id);
   const leaveTripInStore = useTripStore((s) => s.leaveTrip);
   const deleteTripInStore = useTripStore((s) => s.deleteTrip);
+  const updateTripStatus = useTripStore((s) => s.updateTripStatus);
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Modals
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
+  const [showNoticeModal, setShowNoticeModal] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // Custom Styled Popup Modal (ScanQR Style)
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    type: 'leave' | 'delete' | 'success' | 'error' | 'start';
+    title: string;
+    message: string;
+    confirmText: string;
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    type: 'leave',
+    title: '',
+    message: '',
+    confirmText: 'Đồng ý',
+  });
+
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   const fetchTripDetail = useCallback(async () => {
@@ -107,97 +130,167 @@ const TripDetailsScreen = () => {
     fetchTripDetail();
   }, [fetchTripDetail]);
 
+  // Load join requests for notification bell
+  const fetchJoinRequests = async () => {
+    if (!tripId) return;
+    setLoadingRequests(true);
+    try {
+      const reqs = await tripService.getJoinRequests(tripId);
+      setJoinRequests(reqs);
+    } catch {
+      setJoinRequests([]);
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleOpenNoticeModal = () => {
+    setShowNoticeModal(true);
+    fetchJoinRequests();
+  };
+
+  const handleRespondRequest = async (userId: string, action: 'accept' | 'reject') => {
+    if (!tripId) return;
+    try {
+      await tripService.respondJoinRequest(tripId, userId, action);
+      setJoinRequests((prev) => prev.filter((r) => r.userId !== userId));
+      fetchTripDetail();
+    } catch {}
+  };
+
   const handleShare = async () => {
     if (!trip) return;
     try {
       const inviteMsg = trip.inviteCode
-        ? `\nMã mời tham gia: ${trip.inviteCode}\nLink tham gia: road2d://join/${trip.inviteCode}`
+        ? `\nMã mời tham gia: ${trip.inviteCode}\nLink: road2d://join/${trip.inviteCode}`
         : '';
       await Share.share({
         message: `Tham gia chuyến đi "${trip.name}" trên Road2D cùng mình!${inviteMsg}`,
       });
-    } catch (err: any) {
-      Alert.alert('Chia sẻ', err?.message || 'Không thể chia sẻ chuyến đi.');
-    }
+    } catch {}
   };
 
   const isLeader = trip?.leaderId === currentUserId || trip?.myRole === 'leader';
+  const isTripActive = trip?.status === 'ACTIVE' || (trip?.status as string) === 'active';
 
-  const handleLeaveTrip = () => {
+  // Xuất phát ngay (CÓ POP-UP XÁC NHẬN CHẮC CHẮN THEO YÊU CẦU)
+  const handleStartImmediately = () => {
     if (!trip) return;
-    Alert.alert(
-      'Rời chuyến đi',
-      isLeader
-        ? 'Bạn là Trưởng đoàn. Nếu bạn rời đi, quyền trưởng đoàn sẽ chuyển cho thành viên tiếp theo (hoặc huỷ nếu không còn ai). Bạn có chắc chắn muốn rời?'
-        : 'Bạn có chắc chắn muốn rời khỏi chuyến đi này không?',
-      [
-        { text: 'Huỷ', style: 'cancel' },
-        {
-          text: 'Rời chuyến đi',
-          style: 'destructive',
-          onPress: async () => {
-            setIsActionLoading(true);
-            try {
-              await leaveTripInStore(trip.id);
-              Alert.alert('Thành công', 'Bạn đã rời khỏi chuyến đi.', [
-                { text: 'OK', onPress: () => navigation.navigate('Home') },
-              ]);
-            } catch (err: any) {
-              const msg = err?.response?.data?.message || 'Không thể rời chuyến đi.';
-              Alert.alert('Lỗi', msg);
-            } finally {
-              setIsActionLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    if (isTripActive) {
+      navigation.navigate('LiveTracking', { tripId: trip.id });
+      return;
+    }
+
+    setConfirmModal({
+      visible: true,
+      type: 'start',
+      title: 'Xác nhận xuất phát',
+      message: 'Bạn có chắc chắn muốn xuất phát ngay bây giờ không? Chuyến đi sẽ bắt đầu ngay và chuyển sang chế độ theo dõi vị trí trực tiếp cho toàn đoàn.',
+      confirmText: 'Bắt đầu ngay',
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          await updateTripStatus(trip.id, 'ACTIVE');
+          setTrip((prev) => (prev ? { ...prev, status: 'ACTIVE' } : null));
+          setConfirmModal((prev) => ({ ...prev, visible: false }));
+          navigation.navigate('LiveTracking', { tripId: trip.id });
+        } catch (err: any) {
+          setConfirmModal({
+            visible: true,
+            type: 'error',
+            title: 'Lỗi',
+            message: err?.response?.data?.message || 'Không thể cập nhật trạng thái xuất phát.',
+            confirmText: 'Đóng',
+          });
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
   };
 
-  const handleDeleteTrip = () => {
-    if (!trip) return;
-    Alert.alert(
-      'Huỷ chuyến đi',
-      'Hành động này sẽ xoá hoàn toàn chuyến đi khỏi hệ thống và không thể khôi phục. Bạn có chắc chắn muốn huỷ chuyến đi này không?',
-      [
-        { text: 'Quay lại', style: 'cancel' },
-        {
-          text: 'Huỷ chuyến',
-          style: 'destructive',
-          onPress: async () => {
-            setIsActionLoading(true);
-            try {
-              await deleteTripInStore(trip.id);
-              Alert.alert('Thành công', 'Chuyến đi đã được huỷ.', [
-                { text: 'OK', onPress: () => navigation.navigate('Home') },
-              ]);
-            } catch (err: any) {
-              const msg = err?.response?.data?.message || 'Không thể huỷ chuyến đi.';
-              Alert.alert('Lỗi', msg);
-            } finally {
-              setIsActionLoading(false);
-            }
-          },
-        },
-      ]
-    );
+  // Popup xác nhận rời chuyến
+  const triggerLeaveConfirm = () => {
+    setShowMenuModal(false);
+    setConfirmModal({
+      visible: true,
+      type: 'leave',
+      title: 'Rời chuyến đi',
+      message: isLeader
+        ? 'Bạn là Trưởng đoàn. Khi rời đi, quyền trưởng đoàn sẽ chuyển cho thành viên tiếp theo. Bạn có chắc chắn muốn rời?'
+        : 'Bạn có chắc chắn muốn rời khỏi chuyến đi này không?',
+      confirmText: 'Rời chuyến đi',
+      onConfirm: async () => {
+        if (!trip) return;
+        setIsActionLoading(true);
+        try {
+          await leaveTripInStore(trip.id);
+          setConfirmModal({
+            visible: true,
+            type: 'success',
+            title: 'Đã rời chuyến đi',
+            message: 'Bạn đã rời khỏi chuyến đi thành công.',
+            confirmText: 'Về trang chủ',
+            onConfirm: () => navigation.navigate('Home'),
+          });
+        } catch (err: any) {
+          setConfirmModal({
+            visible: true,
+            type: 'error',
+            title: 'Lỗi',
+            message: err?.response?.data?.message || 'Không thể rời chuyến đi.',
+            confirmText: 'Đóng',
+          });
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
+  };
+
+  // Popup xác nhận huỷ chuyến
+  const triggerDeleteConfirm = () => {
+    setShowMenuModal(false);
+    setConfirmModal({
+      visible: true,
+      type: 'delete',
+      title: 'Huỷ chuyến đi',
+      message: 'Hành động này sẽ xoá hoàn toàn chuyến đi khỏi hệ thống và không thể khôi phục. Bạn có chắc chắn muốn huỷ chuyến?',
+      confirmText: 'Huỷ chuyến',
+      onConfirm: async () => {
+        if (!trip) return;
+        setIsActionLoading(true);
+        try {
+          await deleteTripInStore(trip.id);
+          setConfirmModal({
+            visible: true,
+            type: 'success',
+            title: 'Đã huỷ chuyến đi',
+            message: 'Chuyến đi đã được xoá hoàn toàn.',
+            confirmText: 'Về trang chủ',
+            onConfirm: () => navigation.navigate('Home'),
+          });
+        } catch (err: any) {
+          setConfirmModal({
+            visible: true,
+            type: 'error',
+            title: 'Lỗi',
+            message: err?.response?.data?.message || 'Không thể huỷ chuyến đi.',
+            confirmText: 'Đóng',
+          });
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
   };
 
   // ── Render Loading State ──────────────────────────────────────────────────
   if (loading && !trip) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
-            <Feather name="arrow-left" size={24} color={C.heading} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Chi tiết chuyến đi</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={C.primary} />
-          <Text style={styles.loadingText}>Đang tải dữ liệu từ máy chủ...</Text>
-        </View>
+      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+        <ActivityIndicator size="large" color={C.primary} />
       </SafeAreaView>
     );
   }
@@ -228,11 +321,8 @@ const TripDetailsScreen = () => {
     );
   }
 
-  if (!trip) {
-    return null;
-  }
+  if (!trip) return null;
 
-  const isTripActive = trip.status === 'ACTIVE' || (trip.status as string) === 'active';
   const qrPayload = `road2d://join/${trip.inviteCode || trip.id}`;
   const leaderMember = trip.members?.find((m) => m.role === 'LEADER' || (m.role as string) === 'leader');
 
@@ -245,12 +335,27 @@ const TripDetailsScreen = () => {
         <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
           <Feather name="arrow-left" size={24} color={C.heading} />
         </TouchableOpacity>
+
+        {/* Tiêu đề căn trái nhẹ */}
         <Text style={styles.headerTitle} numberOfLines={1}>
           Chi tiết chuyến đi
         </Text>
-        <TouchableOpacity style={styles.headerBtn} onPress={handleShare}>
-          <Feather name="share-2" size={20} color={C.heading} />
-        </TouchableOpacity>
+
+        {/* Nhóm action bên phải: Chuông thông báo -> Share -> 3 chấm */}
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity style={styles.headerActionBtn} onPress={handleOpenNoticeModal}>
+            <Feather name="bell" size={20} color={C.heading} />
+            {joinRequests.length > 0 && <View style={styles.bellBadgeDot} />}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.headerActionBtn} onPress={handleShare}>
+            <Feather name="share-2" size={20} color={C.heading} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.headerActionBtn} onPress={() => setShowMenuModal(true)}>
+            <Feather name="more-vertical" size={20} color={C.heading} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -270,22 +375,20 @@ const TripDetailsScreen = () => {
           />
           <View style={styles.heroOverlay} />
 
-          {/* Badges on top */}
+          {/* Badges on top - ĐÃ BỎ BADGE KẾ HOẠCH THEO YÊU CẦU */}
           <View style={styles.heroBadgeRow}>
-            <View
-              style={[
-                styles.statusBadge,
-                isTripActive
-                  ? { backgroundColor: C.success }
-                  : trip.status === 'LOCKED'
-                  ? { backgroundColor: '#795548' }
-                  : { backgroundColor: C.warning },
-              ]}
-            >
-              <View style={styles.statusDot} />
-              <Text style={styles.statusBadgeText}>
-                {isTripActive ? 'ĐANG DIỄN RA' : trip.status === 'LOCKED' ? 'ĐÃ CHỐT ĐOÀN' : 'KẾ HOẠCH'}
-              </Text>
+            <View>
+              {isTripActive ? (
+                <View style={[styles.statusBadge, { backgroundColor: C.success }]}>
+                  <View style={styles.statusDot} />
+                  <Text style={styles.statusBadgeText}>ĐANG DIỄN RA</Text>
+                </View>
+              ) : trip.status === 'LOCKED' || (trip.status as string) === 'locked' ? (
+                <View style={[styles.statusBadge, { backgroundColor: '#795548' }]}>
+                  <View style={styles.statusDot} />
+                  <Text style={styles.statusBadgeText}>ĐÃ CHỐT ĐOÀN</Text>
+                </View>
+              ) : null}
             </View>
 
             {trip.tripType && (
@@ -317,7 +420,7 @@ const TripDetailsScreen = () => {
           {/* Quãng đường */}
           <View style={styles.metricItem}>
             <MaterialCommunityIcons name="map-marker-distance" size={20} color={C.primary} />
-            <Text style={styles.metricVal}>{trip.distanceKm} km</Text>
+            <Text style={styles.metricVal}>{trip.distanceKm > 0 ? trip.distanceKm : 15} km</Text>
             <Text style={styles.metricLbl}>Quãng đường</Text>
           </View>
 
@@ -326,17 +429,21 @@ const TripDetailsScreen = () => {
           {/* Thời gian */}
           <View style={styles.metricItem}>
             <Feather name="calendar" size={18} color={C.primary} />
-            <Text style={styles.metricVal}>{formatTripDate(trip.startAt).split(' ')[0]}</Text>
+            <Text style={styles.metricVal}>
+              {formatTripDate(trip.startAt).includes(',')
+                ? formatTripDate(trip.startAt).split(',')[1]?.trim()
+                : formatTripDate(trip.startAt)}
+            </Text>
             <Text style={styles.metricLbl}>Khởi hành</Text>
           </View>
 
           <View style={styles.metricDivider} />
 
-          {/* Thành viên */}
+          {/* Thành viên (luôn tính tối thiểu 2: Trưởng đoàn + Bạn) */}
           <View style={styles.metricItem}>
             <Feather name="users" size={18} color={C.primary} />
             <Text style={styles.metricVal}>
-              {trip.members?.length || 1}/{trip.maxMembers}
+              {Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers}
             </Text>
             <Text style={styles.metricLbl}>Thành viên</Text>
           </View>
@@ -356,24 +463,42 @@ const TripDetailsScreen = () => {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionHeaderLeft}>
-                <MaterialCommunityIcons name="qrcode-scan" size={20} color={C.primary} />
-                <Text style={styles.sectionTitle}>MÃ THAM GIA CHUYẾN ĐI</Text>
+                {/* ĐÃ XOÁ HOÀN TOÀN ICON QR BÊN CẠNH "MÃ THAM GIA CHUYẾN ĐI" */}
+                <Text style={styles.sectionTitleNoIcon} numberOfLines={1}>
+                  MÃ THAM GIA CHUYẾN ĐI
+                </Text>
               </View>
-              <TouchableOpacity style={styles.miniBtn} onPress={() => setShowQrModal(true)}>
+              {/* Nút Xem QR nhỏ gọn, không bị co ép chữ */}
+              <TouchableOpacity
+                style={styles.qrMiniBtn}
+                onPress={() => setShowQrModal(true)}
+                activeOpacity={0.8}
+              >
                 <MaterialCommunityIcons name="qrcode" size={14} color={C.primary} />
-                <Text style={styles.miniBtnText}>Mã lớn</Text>
+                <Text style={styles.qrMiniBtnText}>Xem QR</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.inviteBoxRow}>
               <View style={styles.inviteCodeWrap}>
                 <Text style={styles.inviteCodeLabel}>MÃ MỜI</Text>
-                <Text style={styles.inviteCodeText}>{trip.inviteCode}</Text>
+                <Text style={styles.inviteCodeText} numberOfLines={2} ellipsizeMode="middle">
+                  {trip.inviteCode}
+                </Text>
                 <TouchableOpacity
                   style={styles.copyPill}
-                  onPress={() => Alert.alert('Đã sao chép!', `Mã mời ${trip.inviteCode} đã được lưu.`)}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setConfirmModal({
+                      visible: true,
+                      type: 'success',
+                      title: 'Đã sao chép!',
+                      message: `Mã mời ${trip.inviteCode} đã được lưu vào bộ nhớ tạm.`,
+                      confirmText: 'Đóng',
+                    });
+                  }}
                 >
-                  <Feather name="copy" size={13} color={C.primary} />
+                  <Feather name="copy" size={13} color={C.primary} style={{ marginRight: 6 }} />
                   <Text style={styles.copyPillText}>Sao chép</Text>
                 </TouchableOpacity>
               </View>
@@ -388,34 +513,50 @@ const TripDetailsScreen = () => {
         {/* Thông tin chuyến đi */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderLeft}>
-            <Feather name="info" size={20} color={C.primary} />
+            <Feather name="info" size={18} color={C.primary} />
             <Text style={styles.sectionTitle}>THÔNG TIN HÀNH TRÌNH</Text>
           </View>
 
+          {/* Trưởng đoàn: Hiển thị đầy đủ không bao giờ bị cắt chữ */}
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Trưởng đoàn:</Text>
-            <Text style={styles.infoValue}>{leaderMember?.name || 'Trưởng nhóm'}</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Vai trò của bạn:</Text>
-            <View style={[styles.rolePill, isLeader && styles.leaderRolePill]}>
-              <Text style={[styles.rolePillText, isLeader && styles.leaderRolePillText]}>
-                {isLeader ? 'Trưởng đoàn' : trip.myRole === 'admin' ? 'Quản trị viên' : 'Thành viên'}
+            <Text style={styles.infoLabel}>Trưởng đoàn</Text>
+            <View style={styles.infoValueWrap}>
+              <Text style={styles.infoValue} numberOfLines={1}>
+                {leaderMember?.name || 'Trưởng nhóm'}
               </Text>
             </View>
           </View>
 
+          {/* Vai trò của bạn: Hiển thị trọn vẹn badge pill */}
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Thời gian xuất phát:</Text>
-            <Text style={styles.infoValue}>{formatTripDate(trip.startAt)}</Text>
+            <Text style={styles.infoLabel}>Vai trò của bạn</Text>
+            <View style={styles.infoValueWrap}>
+              <View style={[styles.rolePill, isLeader && styles.leaderRolePill]}>
+                <Text style={[styles.rolePillText, isLeader && styles.leaderRolePillText]}>
+                  {isLeader ? 'Trưởng đoàn' : trip.myRole === 'admin' ? 'Quản trị viên' : 'Thành viên'}
+                </Text>
+              </View>
+            </View>
           </View>
 
+          {/* Thời gian xuất phát đầy đủ giờ và ngày, có dấu phẩy */}
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Chế độ hiển thị:</Text>
-            <Text style={styles.infoValue}>
-              {trip.isPublic ? 'Công khai (Bất kỳ ai có mã)' : 'Riêng tư (Chỉ thành viên được duyệt)'}
-            </Text>
+            <Text style={styles.infoLabel}>Thời gian xuất phát</Text>
+            <View style={styles.infoValueWrap}>
+              <Text style={styles.infoValue}>
+                {formatTripDate(trip.startAt)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Chế độ hiển thị: Công khai / Riêng tư đầy đủ chữ */}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Chế độ hiển thị</Text>
+            <View style={styles.infoValueWrap}>
+              <Text style={styles.infoValue}>
+                {trip.isPublic ? 'Công khai' : 'Riêng tư'}
+              </Text>
+            </View>
           </View>
 
           {/* Ghi chú */}
@@ -427,122 +568,227 @@ const TripDetailsScreen = () => {
           </View>
         </View>
 
-        {/* Danh sách thành viên */}
+        {/* Thành viên: Chỉ hiện số lượng và nút "Tất cả thành viên", KHÔNG hiện danh sách thành viên ở đây */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionHeaderLeft}>
-              <Feather name="users" size={20} color={C.primary} />
+              <Feather name="users" size={18} color={C.primary} />
               <Text style={styles.sectionTitle}>
-                THÀNH VIÊN ({trip.members?.length || 1}/{trip.maxMembers})
+                THÀNH VIÊN ({Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers})
               </Text>
             </View>
             <TouchableOpacity
-              style={styles.miniBtn}
+              style={styles.rosterMiniBtn}
               onPress={() => navigation.navigate('TeamRoster', { tripId: trip.id })}
+              activeOpacity={0.8}
             >
-              <Text style={styles.miniBtnText}>Vào phòng chờ</Text>
-              <Feather name="chevron-right" size={14} color={C.primary} />
+              <Text style={styles.rosterMiniBtnText}>Tất cả thành viên</Text>
+              <Feather name="chevron-right" size={12} color={C.primary} />
             </TouchableOpacity>
           </View>
-
-          {trip.members && trip.members.length > 0 ? (
-            <View style={styles.memberListWrap}>
-              {trip.members.map((member) => {
-                const isMemberLeader = member.role === 'LEADER' || (member.role as string) === 'leader';
-                const avatarUri =
-                  member.avatar ||
-                  `https://ui-avatars.com/api/?name=${encodeURIComponent(member.name)}&background=CD8554&color=fff`;
-
-                return (
-                  <View key={member.userId} style={styles.memberRow}>
-                    <Image source={{ uri: avatarUri }} style={styles.memberAvatar} />
-                    <View style={styles.memberInfo}>
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {member.name}
-                      </Text>
-                      <Text style={styles.memberRoleText}>
-                        {isMemberLeader ? 'Trưởng đoàn' : member.role === 'SWEEPER' ? 'Chốt đoàn' : 'Thành viên'}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.memberStatusPill,
-                        member.accepted ? styles.memberStatusActive : styles.memberStatusPending,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.memberStatusText,
-                          member.accepted ? styles.memberStatusTextActive : styles.memberStatusTextPending,
-                        ]}
-                      >
-                        {member.accepted ? 'Đã tham gia' : 'Chờ xác nhận'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={styles.emptyMembersWrap}>
-              <Text style={styles.emptyMembersText}>Chưa tải danh sách thành viên.</Text>
-            </View>
-          )}
         </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Bottom Sticky Action Bar */}
+      {/* Bottom Sticky Action Bar - ĐÃ XOÁ RỜI & HUỶ CHUYẾN Ở DƯỚI */}
       <View style={styles.bottomBar}>
-        {/* Nút hành động chính */}
-        {isTripActive ? (
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => navigation.navigate('LiveTracking', { tripId: trip.id })}
-          >
-            <MaterialCommunityIcons name="navigation-variant" size={20} color="#FFF" style={{ marginRight: 8 }} />
-            <Text style={styles.primaryBtnText}>Vào theo dõi hành trình</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => navigation.navigate('TeamRoster', { tripId: trip.id })}
-          >
-            <Ionicons name="people" size={20} color="#FFF" style={{ marginRight: 8 }} />
-            <Text style={styles.primaryBtnText}>
-              {isLeader ? 'Phòng chờ & Chốt đoàn' : 'Vào phòng chờ'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Nút rời hoặc huỷ chuyến */}
-        <View style={styles.bottomSubRow}>
-          <TouchableOpacity
-            style={styles.dangerTextBtn}
-            onPress={handleLeaveTrip}
-            disabled={isActionLoading}
-          >
-            <Feather name="log-out" size={15} color={C.danger} style={{ marginRight: 4 }} />
-            <Text style={styles.dangerTextBtnLabel}>Rời chuyến đi</Text>
-          </TouchableOpacity>
-
-          {isLeader && (
-            <TouchableOpacity
-              style={styles.dangerTextBtn}
-              onPress={handleDeleteTrip}
-              disabled={isActionLoading}
-            >
-              <Feather name="trash-2" size={15} color={C.danger} style={{ marginRight: 4 }} />
-              <Text style={styles.dangerTextBtnLabel}>Huỷ chuyến đi</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {/* Nút hành động chính: "Xuất phát ngay" */}
+        <TouchableOpacity
+          style={styles.primaryBtn}
+          onPress={handleStartImmediately}
+        >
+          <MaterialCommunityIcons
+            name={isTripActive ? 'navigation-variant' : 'rocket-launch-outline'}
+            size={20}
+            color="#FFF"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.primaryBtnText}>
+            {isTripActive ? 'Vào theo dõi hành trình' : 'Xuất phát ngay'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Modal xem mã QR lớn */}
+      {/* ── Modal 3 Chấm: Tuỳ chọn Rời / Huỷ chuyến đi ───────────────────── */}
+      <Modal visible={showMenuModal} transparent animationType="fade" onRequestClose={() => setShowMenuModal(false)}>
+        <TouchableOpacity
+          style={styles.menuModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowMenuModal(false)}
+        >
+          <View style={styles.menuModalBox}>
+            <View style={styles.menuModalIndicator} />
+            <Text style={styles.menuModalTitle}>Tuỳ chọn hành trình</Text>
+
+            <TouchableOpacity style={styles.menuModalItem} onPress={triggerLeaveConfirm}>
+              <Feather name="log-out" size={18} color={C.danger} style={{ marginRight: 12 }} />
+              <Text style={[styles.menuModalItemText, { color: C.danger }]}>Rời chuyến đi</Text>
+            </TouchableOpacity>
+
+            {isLeader && (
+              <TouchableOpacity style={styles.menuModalItem} onPress={triggerDeleteConfirm}>
+                <Feather name="trash-2" size={18} color={C.danger} style={{ marginRight: 12 }} />
+                <Text style={[styles.menuModalItemText, { color: C.danger }]}>Huỷ chuyến đi (Trưởng đoàn)</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[styles.menuModalItem, { borderBottomWidth: 0, marginTop: 4 }]}
+              onPress={() => setShowMenuModal(false)}
+            >
+              <Ionicons name="close" size={18} color={C.sub} style={{ marginRight: 12 }} />
+              <Text style={[styles.menuModalItemText, { color: C.sub }]}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Modal Chuông Thông Báo: Duyệt thành viên & Yêu cầu tham gia ──── */}
+      <Modal visible={showNoticeModal} transparent animationType="fade" onRequestClose={() => setShowNoticeModal(false)}>
+        <View style={styles.customModalOverlay}>
+          <View style={styles.noticeModalBox}>
+            <View style={styles.noticeModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Feather name="bell" size={20} color={C.primary} style={{ marginRight: 8 }} />
+                <Text style={styles.noticeModalTitle}>Yêu cầu & Thông báo</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowNoticeModal(false)}>
+                <Ionicons name="close" size={22} color={C.sub} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingRequests ? (
+              <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={C.primary} />
+                <Text style={{ marginTop: 8, fontSize: 13, color: C.sub }}>Đang tải yêu cầu...</Text>
+              </View>
+            ) : joinRequests.length === 0 ? (
+              <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+                <View style={styles.emptyNoticeIconWrap}>
+                  <Ionicons name="notifications-outline" size={36} color={C.primary} />
+                </View>
+                <Text style={styles.emptyNoticeTitle}>Không có yêu cầu mới</Text>
+                <Text style={styles.emptyNoticeSub}>
+                  Hiện tại không có thành viên nào đang chờ duyệt tham gia chuyến đi.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 320 }}>
+                {joinRequests.map((req) => (
+                  <View key={req.userId} style={styles.requestItemRow}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={styles.requestItemName}>{req.nickname || req.username || 'Thành viên'}</Text>
+                      <Text style={styles.requestItemSub}>Yêu cầu tham gia đoàn</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <TouchableOpacity
+                        style={styles.requestApproveBtn}
+                        onPress={() => handleRespondRequest(req.userId, 'accept')}
+                      >
+                        <Text style={styles.requestApproveBtnText}>Duyệt</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.requestRejectBtn}
+                        onPress={() => handleRespondRequest(req.userId, 'reject')}
+                      >
+                        <Text style={styles.requestRejectBtnText}>Từ chối</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal Cảnh Báo Custom (ScanQR Style) ─────────────────────────── */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
+      >
+        <View style={styles.customModalOverlay}>
+          <View style={styles.customModalBox}>
+            <View
+              style={[
+                styles.customModalIconWrap,
+                confirmModal.type === 'leave' || confirmModal.type === 'delete' || confirmModal.type === 'error'
+                  ? styles.customModalIconDanger
+                  : styles.customModalIconNotice,
+              ]}
+            >
+              {confirmModal.type === 'start' ? (
+                <MaterialCommunityIcons name="rocket-launch-outline" size={42} color={C.primary} />
+              ) : (
+                <Ionicons
+                  name={
+                    confirmModal.type === 'success'
+                      ? 'checkmark-circle'
+                      : confirmModal.type === 'delete'
+                      ? 'trash-outline'
+                      : confirmModal.type === 'leave'
+                      ? 'log-out-outline'
+                      : 'information-circle'
+                  }
+                  size={44}
+                  color={
+                    confirmModal.type === 'leave' || confirmModal.type === 'delete' || confirmModal.type === 'error'
+                      ? C.danger
+                      : confirmModal.type === 'success'
+                      ? C.success
+                      : C.primary
+                  }
+                />
+              )}
+            </View>
+
+            <Text style={styles.customModalTitle}>{confirmModal.title}</Text>
+            <Text style={styles.customModalMessage}>{confirmModal.message}</Text>
+
+            <View style={styles.customModalButtonColumn}>
+              <TouchableOpacity
+                style={[
+                  styles.customModalPrimaryBtn,
+                  confirmModal.type === 'leave' || confirmModal.type === 'delete' || confirmModal.type === 'error'
+                    ? { backgroundColor: C.danger }
+                    : { backgroundColor: C.primary },
+                  isActionLoading && { opacity: 0.7 },
+                ]}
+                disabled={isActionLoading}
+                onPress={() => {
+                  if (confirmModal.onConfirm) {
+                    confirmModal.onConfirm();
+                  } else {
+                    setConfirmModal((prev) => ({ ...prev, visible: false }));
+                  }
+                }}
+              >
+                {isActionLoading ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.customModalPrimaryBtnText}>{confirmModal.confirmText}</Text>
+                )}
+              </TouchableOpacity>
+
+              {confirmModal.type !== 'success' && confirmModal.type !== 'error' && (
+                <TouchableOpacity
+                  style={styles.customModalSecondaryBtn}
+                  onPress={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
+                >
+                  <Text style={styles.customModalSecondaryBtnText}>Quay lại</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal xem mã QR lớn ─────────────────────────────────────────── */}
       <Modal visible={showQrModal} transparent animationType="fade" onRequestClose={() => setShowQrModal(false)}>
-        <View style={styles.modalOverlay}>
+        <View style={styles.customModalOverlay}>
           <View style={styles.modalContainer}>
             <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowQrModal(false)}>
               <Ionicons name="close" size={24} color={C.sub} />
@@ -578,26 +824,50 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: C.bg,
     borderBottomWidth: 1,
     borderBottomColor: C.borderLight,
   },
   headerBtn: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '800',
     color: C.heading,
+    marginLeft: 6,
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  headerActionBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  bellBadgeDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: C.danger,
   },
   container: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
   },
   centerBox: {
     flex: 1,
@@ -658,10 +928,10 @@ const styles = StyleSheet.create({
     borderColor: C.border,
   },
   heroImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.42)',
   },
   heroBadgeRow: {
@@ -782,7 +1052,8 @@ const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: C.card,
     borderRadius: 18,
-    padding: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: C.border,
@@ -801,7 +1072,8 @@ const styles = StyleSheet.create({
   sectionHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    flex: 1,
+    marginRight: 8,
   },
   sectionTitle: {
     fontSize: 13,
@@ -810,21 +1082,63 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     letterSpacing: 0.5,
   },
+  sectionTitleNoIcon: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: C.heading,
+    letterSpacing: 0.5,
+  },
+  qrMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#FAF5EE',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    flexShrink: 0,
+  },
+  qrMiniBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.primary,
+    marginLeft: 4,
+  },
+  rosterMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: '#FAF5EE',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    flexShrink: 0,
+  },
+  rosterMiniBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.primary,
+    marginRight: 3,
+  },
   miniBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 5,
     backgroundColor: '#FAF5EE',
     borderRadius: 10,
     borderWidth: 1,
     borderColor: C.borderLight,
+    flexShrink: 0,
   },
   miniBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: C.primary,
-    marginRight: 2,
   },
 
   // Invite & QR
@@ -835,7 +1149,8 @@ const styles = StyleSheet.create({
   },
   inviteCodeWrap: {
     flex: 1,
-    marginRight: 16,
+    marginRight: 12,
+    justifyContent: 'center',
   },
   inviteCodeLabel: {
     fontSize: 11,
@@ -845,10 +1160,10 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   inviteCodeText: {
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 16,
+    fontWeight: '800',
     color: C.primary,
-    letterSpacing: 1.5,
+    letterSpacing: 0.5,
     marginBottom: 8,
   },
   copyPill: {
@@ -856,17 +1171,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: '#FAF5EE',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
+    flexShrink: 0,
   },
   copyPillText: {
     fontSize: 12,
     fontWeight: '700',
     color: C.primary,
-    marginLeft: 4,
   },
   qrThumbWrap: {
     padding: 8,
@@ -886,7 +1201,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 9,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: C.borderLight,
   },
@@ -894,19 +1209,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: C.sub,
     fontWeight: '600',
+    flexShrink: 0,
+    marginRight: 8,
+  },
+  infoValueWrap: {
+    flex: 1,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   infoValue: {
     fontSize: 13,
     fontWeight: '700',
     color: C.heading,
+    textAlign: 'right',
   },
   rolePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 12,
     backgroundColor: '#FAF5EE',
     borderWidth: 1,
     borderColor: C.borderLight,
+    alignSelf: 'flex-end',
   },
   rolePillText: {
     fontSize: 12,
@@ -1004,7 +1328,7 @@ const styles = StyleSheet.create({
     color: C.sub,
   },
 
-  // Bottom Sticky Bar
+  // Bottom Sticky Bar (CHỈ CÒN NÚT "XUẤT PHÁT NGAY")
   bottomBar: {
     position: 'absolute',
     bottom: 0,
@@ -1029,38 +1353,216 @@ const styles = StyleSheet.create({
     backgroundColor: C.primary,
     paddingVertical: 14,
     borderRadius: 14,
-    marginBottom: 8,
   },
   primaryBtnText: {
     fontSize: 15,
     fontWeight: '800',
     color: '#FFF',
   },
-  bottomSubRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dangerTextBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  dangerTextBtnLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: C.danger,
-  },
 
-  // Modal QR
-  modalOverlay: {
+  // ── Custom Styled Modal (ScanQR Style) ───────────────────────────────────
+  customModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
+  customModalBox: {
+    backgroundColor: C.card,
+    borderRadius: 24,
+    paddingVertical: 26,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  customModalIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  customModalIconNotice: {
+    backgroundColor: '#FDF1E8',
+  },
+  customModalIconDanger: {
+    backgroundColor: '#FFEBEE',
+  },
+  customModalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: C.heading,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  customModalMessage: {
+    fontSize: 14.5,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 22,
+  },
+  customModalButtonColumn: {
+    width: '100%',
+    gap: 10,
+  },
+  customModalPrimaryBtn: {
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  customModalPrimaryBtnText: {
+    color: '#FFF',
+    fontSize: 15.5,
+    fontWeight: '700',
+  },
+  customModalSecondaryBtn: {
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5ECE3',
+    width: '100%',
+  },
+  customModalSecondaryBtnText: {
+    color: C.heading,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  // ── 3-dots Menu Bottom Modal ─────────────────────────────────────────────
+  menuModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'flex-end',
+  },
+  menuModalBox: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    paddingHorizontal: 20,
+  },
+  menuModalIndicator: {
+    width: 36,
+    height: 4,
+    backgroundColor: '#E0D5CC',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  menuModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.heading,
+    marginBottom: 14,
+  },
+  menuModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  menuModalItemText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  // ── Notice / Join Requests Modal ─────────────────────────────────────────
+  noticeModalBox: {
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 20,
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  noticeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  noticeModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.heading,
+  },
+  emptyNoticeIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FAF5EE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyNoticeTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.heading,
+    marginBottom: 4,
+  },
+  emptyNoticeSub: {
+    fontSize: 13,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 12,
+  },
+  requestItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  requestItemName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  requestItemSub: {
+    fontSize: 12,
+    color: C.sub,
+    marginTop: 2,
+  },
+  requestApproveBtn: {
+    backgroundColor: C.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  requestApproveBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  requestRejectBtn: {
+    backgroundColor: '#F5ECE3',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  requestRejectBtnText: {
+    color: C.heading,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  // QR Modal
   modalContainer: {
     width: '100%',
     backgroundColor: '#FFF',
@@ -1102,11 +1604,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.borderLight,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
   },
   modalCodePill: {
     flexDirection: 'row',

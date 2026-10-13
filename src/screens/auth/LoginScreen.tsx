@@ -39,7 +39,6 @@ import { Input } from '../../components/ui/Input';
 import authService from '../../services/api/authService';
 import tokenStorage from '../../services/storage/tokenStorage';
 import { useAuthStore } from '../../store/useAuthStore';
-import { MOCK_CURRENT_USER } from '../../mocks/mockData';
 import type { LoginScreenNavigationProp } from '../../types/navigation';
 
 type ScreenMode =
@@ -110,7 +109,13 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
 
   const handleBypassLogin = async () => {
     await tokenStorage.saveTokens('mock-access', 'mock-refresh');
-    useAuthStore.getState().login(MOCK_CURRENT_USER);
+    useAuthStore.getState().login({
+      id: 'u_dev',
+      name: 'Developer',
+      phone: '0900000000',
+      username: 'dev.r2d',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200',
+    });
   };
 
   const startCountdown = (seconds = 60) => {
@@ -660,10 +665,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E140F',
   },
   background: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
 

@@ -88,7 +88,7 @@ export const BottomSheet = ({
     <>
       <Animated.View style={[styles.backdrop, backdropStyle]}>
         <TouchableWithoutFeedback onPress={() => scrollTo(MIN_TRANSLATE_Y)}>
-          <View style={StyleSheet.absoluteFillObject} />
+          <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
       </Animated.View>
       <GestureDetector gesture={gesture}>
@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
     zIndex: 99,
   },

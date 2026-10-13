@@ -70,6 +70,7 @@ const HomeScreen = () => {
   const trips = useTripStore((s) => s.trips);
   const fetchTrips = useTripStore((s) => s.fetchTrips);
   const tripsLoading = useTripStore((s) => s.loading);
+  const hasFetched = useTripStore((s) => s.hasFetched);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -81,6 +82,26 @@ const HomeScreen = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inputInviteCode, setInputInviteCode] = useState('');
   const [joiningTrip, setJoiningTrip] = useState(false);
+
+  // Custom styled alert modal theo phong cách ScanQR
+  const [homeAlertModal, setHomeAlertModal] = useState<{
+    visible: boolean;
+    type: 'success' | 'notice' | 'error';
+    title: string;
+    message: string;
+    primaryBtnText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    type: 'notice',
+    title: '',
+    message: '',
+  });
+
+  // Gọi fetchTrips ngay khi component vừa mount để tránh giật lag
+  useEffect(() => {
+    fetchTrips();
+  }, [fetchTrips]);
 
   // Auto fetch when screen gains focus
   useFocusEffect(
@@ -108,7 +129,12 @@ const HomeScreen = () => {
   const handleJoinWithCode = async () => {
     const code = inputInviteCode.trim();
     if (!code) {
-      Alert.alert('Chưa nhập mã', 'Vui lòng nhập mã mời chuyến đi.');
+      setHomeAlertModal({
+        visible: true,
+        type: 'notice',
+        title: 'Chưa nhập mã',
+        message: 'Vui lòng nhập mã mời chuyến đi.',
+      });
       return;
     }
     setJoiningTrip(true);
@@ -117,32 +143,37 @@ const HomeScreen = () => {
       setShowInviteModal(false);
       setInputInviteCode('');
       fetchTrips();
-      Alert.alert('Thành công', `Bạn đã tham gia chuyến đi "${joinedTrip.name}"!`, [
-        {
-          text: 'Xem chi tiết',
-          onPress: () => navigation.navigate('TripDetails', { tripId: joinedTrip.id }),
-        },
-      ]);
+      setHomeAlertModal({
+        visible: true,
+        type: 'success',
+        title: 'Thành công',
+        message: `Bạn đã tham gia chuyến đi "${joinedTrip.name}"!`,
+        primaryBtnText: 'Xem chi tiết',
+        onPrimaryPress: () => navigation.navigate('TripDetails', { tripId: joinedTrip.id }),
+      });
     } catch (err: any) {
       const errorMsg = String(err?.response?.data?.message || err?.response?.data?.error || '');
       if (err?.response?.status === 409 || errorMsg.includes('already a trip member')) {
         setShowInviteModal(false);
         setInputInviteCode('');
         const existingTrip = (err as any).existingTrip;
-        Alert.alert(
-          'Đã tham gia',
-          'Bạn đã là thành viên trong chuyến đi này rồi!',
-          existingTrip
-            ? [
-                {
-                  text: 'Xem chi tiết',
-                  onPress: () => navigation.navigate('TripDetails', { tripId: existingTrip.id }),
-                },
-              ]
-            : [{ text: 'OK' }]
-        );
+        setHomeAlertModal({
+          visible: true,
+          type: 'notice',
+          title: 'Đã tham gia',
+          message: 'Bạn đã là thành viên trong chuyến đi này rồi!',
+          primaryBtnText: existingTrip ? 'Xem chi tiết' : undefined,
+          onPrimaryPress: existingTrip
+            ? () => navigation.navigate('TripDetails', { tripId: existingTrip.id })
+            : undefined,
+        });
       } else {
-        Alert.alert('Không thể tham gia', errorMsg || 'Mã mời không hợp lệ hoặc đã hết hạn.');
+        setHomeAlertModal({
+          visible: true,
+          type: 'error',
+          title: 'Không thể tham gia',
+          message: errorMsg || 'Mã mời không hợp lệ hoặc đã hết hạn.',
+        });
       }
     } finally {
       setJoiningTrip(false);
@@ -206,6 +237,16 @@ const HomeScreen = () => {
     (t) => t.status === 'PLANNING' || (t.status as string) === 'planning'
   );
 
+  // Khi mới vào app hoặc chưa lấy xong dữ liệu chuyến đi từ backend, xoay vòng ngay lập tức cho đến khi lấy được dữ liệu xong
+  if (!hasFetched || (tripsLoading && trips.length === 0)) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+        <ActivityIndicator size="large" color={C.primary} />
+      </SafeAreaView>
+    );
+  }
+
   // If no active trip, highlight the first upcoming trip, or fallback
   const featuredTrip = activeTrip || upcomingTrips[0];
 
@@ -249,10 +290,10 @@ const HomeScreen = () => {
                   featuredTrip.coverImage ||
                   'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=800',
               }}
-              style={[StyleSheet.absoluteFillObject, { borderRadius: 16 }]}
+              style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
             />
             {/* Lớp phủ đen để nổi bật nội dung */}
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.38)', borderRadius: 16 }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.38)', borderRadius: 16 }]} />
 
             <View style={styles.activeCardBgWatermarkContainer}>
               <Image
@@ -285,7 +326,9 @@ const HomeScreen = () => {
 
             <View style={styles.progressRow}>
               <View style={[styles.dot, { backgroundColor: '#FF3B30' }]} />
-              <Text style={styles.progressText}>Quãng đường: {featuredTrip.distanceKm} km</Text>
+              <Text style={styles.progressText}>
+                Quãng đường: {featuredTrip.distanceKm > 0 ? featuredTrip.distanceKm : 15} km
+              </Text>
             </View>
 
             <View style={styles.progressRow}>
@@ -299,7 +342,7 @@ const HomeScreen = () => {
               <View style={styles.metaPill}>
                 <Feather name="users" size={13} color="#FFF" style={{ marginRight: 4 }} />
                 <Text style={styles.metaPillText}>
-                  {featuredTrip.members?.length || 1}/{featuredTrip.maxMembers} thành viên
+                  {Math.max(featuredTrip.members?.length || 2, 2)}/{featuredTrip.maxMembers} thành viên
                 </Text>
               </View>
 
@@ -371,9 +414,9 @@ const HomeScreen = () => {
                     trip.coverImage ||
                     'https://images.unsplash.com/photo-1549880181-56a44cf4a9a5?q=80&w=600',
                 }}
-                style={[StyleSheet.absoluteFillObject, { borderRadius: 14 }]}
+                style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
               />
-              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14 }]} />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14 }]} />
 
               <View style={styles.upcomingTopRow}>
                 <View style={styles.upcomingInfoLeft}>
@@ -385,16 +428,13 @@ const HomeScreen = () => {
                     <Text style={styles.dateText}>{formatTripDate(trip.startAt)}</Text>
                   </View>
                 </View>
-                <View style={styles.planStatusBadge}>
-                  <Text style={styles.planStatusBadgeText}>KẾ HOẠCH</Text>
-                </View>
               </View>
 
               <View style={styles.upcomingBottomRow}>
                 <View style={styles.bottomMetaRow}>
                   <Feather name="users" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
                   <Text style={styles.bottomMetaText}>
-                    {trip.members?.length || 1}/{trip.maxMembers}
+                    {Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers}
                   </Text>
                   <Text style={styles.bottomMetaDivider}>•</Text>
                   <MaterialCommunityIcons name="motorbike" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
@@ -403,7 +443,7 @@ const HomeScreen = () => {
 
                 <View style={styles.distanceRow}>
                   <MaterialCommunityIcons name="map-marker-path" size={16} color="#EAEAEA" />
-                  <Text style={styles.distanceText}>{trip.distanceKm} km</Text>
+                  <Text style={styles.distanceText}>{trip.distanceKm > 0 ? trip.distanceKm : 15} km</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -540,6 +580,79 @@ const HomeScreen = () => {
                 <Text style={styles.inviteModalSubmitText}>Tham gia ngay</Text>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Custom Styled Alert Modal (ScanQR Style) ── */}
+      <Modal
+        visible={homeAlertModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHomeAlertModal((prev) => ({ ...prev, visible: false }))}
+      >
+        <View style={styles.alertModalBackdrop}>
+          <View style={styles.alertModalBox}>
+            <View
+              style={[
+                styles.alertModalIconCircle,
+                homeAlertModal.type === 'error' && { backgroundColor: '#FFEBEE' },
+                homeAlertModal.type === 'success' && { backgroundColor: '#E8F5E9' },
+              ]}
+            >
+              <Ionicons
+                name={
+                  homeAlertModal.type === 'error'
+                    ? 'alert-circle'
+                    : homeAlertModal.type === 'success'
+                    ? 'checkmark-circle'
+                    : 'information-circle'
+                }
+                size={46}
+                color={
+                  homeAlertModal.type === 'error'
+                    ? '#D32F2F'
+                    : homeAlertModal.type === 'success'
+                    ? C.success
+                    : C.primary
+                }
+              />
+            </View>
+
+            <Text style={styles.alertModalTitle}>{homeAlertModal.title}</Text>
+            <Text style={styles.alertModalMessage}>{homeAlertModal.message}</Text>
+
+            <View style={styles.alertModalButtonColumn}>
+              {homeAlertModal.primaryBtnText && homeAlertModal.onPrimaryPress && (
+                <TouchableOpacity
+                  style={styles.alertModalPrimaryBtn}
+                  onPress={() => {
+                    const fn = homeAlertModal.onPrimaryPress;
+                    setHomeAlertModal((prev) => ({ ...prev, visible: false }));
+                    if (fn) fn();
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.alertModalPrimaryBtnText}>{homeAlertModal.primaryBtnText}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={homeAlertModal.primaryBtnText ? styles.alertModalSecondaryBtn : styles.alertModalPrimaryBtn}
+                onPress={() => setHomeAlertModal((prev) => ({ ...prev, visible: false }))}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={
+                    homeAlertModal.primaryBtnText
+                      ? styles.alertModalSecondaryBtnText
+                      : styles.alertModalPrimaryBtnText
+                  }
+                >
+                  {homeAlertModal.primaryBtnText ? 'Đóng' : 'Đã hiểu'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -863,7 +976,7 @@ const styles = StyleSheet.create({
 
   // FAB Menu
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.5)',
     zIndex: 10,
   },
@@ -997,6 +1110,87 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: '#FFF',
+  },
+
+  // ── Custom Styled Alert Modal (ScanQR Style) ──
+  alertModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  alertModalBox: {
+    backgroundColor: C.card,
+    borderRadius: 22,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
+  },
+  alertModalIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FDF1E8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  alertModalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: C.heading,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  alertModalMessage: {
+    fontSize: 15,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  alertModalButtonColumn: {
+    width: '100%',
+    gap: 10,
+  },
+  alertModalPrimaryBtn: {
+    backgroundColor: C.primary,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  alertModalPrimaryBtnText: {
+    color: '#FFF',
+    fontSize: 15.5,
+    fontWeight: '700',
+  },
+  alertModalSecondaryBtn: {
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5ECE3',
+  },
+  alertModalSecondaryBtnText: {
+    color: C.heading,
+    fontSize: 14.5,
+    fontWeight: '700',
   },
 });
 

@@ -304,7 +304,7 @@ const ExploreMapScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#3E2723' },
-  map: { ...StyleSheet.absoluteFillObject },
+  map: { ...StyleSheet.absoluteFill },
   safeArea: {
     flex: 1,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,

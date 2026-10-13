@@ -13,7 +13,6 @@
     },
     "android": {
       "package": "com.road2d.app",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#3E2723",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

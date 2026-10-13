@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   routeLoader: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(36,24,16,0.7)',
     alignItems: 'center',
     justifyContent: 'center',

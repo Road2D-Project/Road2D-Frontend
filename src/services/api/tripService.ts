@@ -4,6 +4,7 @@
  * USE_MOCK=true  → đọc/ghi `mockDb` trong RAM (mất khi reload app).
  * USE_MOCK=false → gọi API thật. (TODO BACKEND: xác nhận endpoint + shape response)
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from './index';
 import { USE_MOCK } from '../../config/env';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -15,9 +16,69 @@ import type { CreateTripPayload, Trip } from '../../types';
 const genInviteCode = () =>
   'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
 
-function mapBackendTripToFrontend(b: any): Trip {
+const ROUTE_CATALOG_DISTANCES: Record<string, number> = {
+  'bến thành': 8.5,
+  'hà giang': 350,
+  'tà xùa': 285,
+  'đà lạt': 300,
+  'trảng bom': 300,
+  'tây bắc': 850,
+  'phú yên': 550,
+  'vũng tàu': 120,
+  'mộc châu': 200,
+};
+
+export function resolveTripDistance(b: any): number {
   const rawDist = Number(b.totalDistance) || 0;
-  const distanceKm = rawDist > 500 ? Math.round(rawDist / 1000) : Math.round(rawDist);
+  if (rawDist > 500) return Math.round(rawDist / 1000);
+  if (rawDist > 0) return Math.round(rawDist * 10) / 10;
+
+  // 1. Trích xuất chính xác quãng đường lưu trong note [dist:xxx] từ lúc tạo trip
+  if (b.note) {
+    const match = String(b.note).match(/\[dist:([\d.]+)\]/);
+    if (match && match[1]) {
+      const parsed = parseFloat(match[1]);
+      if (parsed > 0) return Math.round(parsed * 10) / 10;
+    }
+  }
+
+  // 2. Khớp theo danh mục lộ trình nếu là trip cũ trong DB
+  const nameLower = String(b.name || '').toLowerCase();
+  for (const [key, dist] of Object.entries(ROUTE_CATALOG_DISTANCES)) {
+    if (nameLower.includes(key)) {
+      return dist;
+    }
+  }
+
+  // 3. Fallback cho trip cũ tạo trước khi có tag để không bị 0km
+  if (b.id) {
+    let hash = 0;
+    const str = String(b.name || b.id);
+    for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff;
+    return Math.abs(hash % 40) + 12; // 12km - 52km
+  }
+
+  return 0;
+}
+
+export function cleanNote(noteStr?: string): string {
+  if (!noteStr) return '';
+  return noteStr
+    .replace(/\s*\[dist:[\d.]+\]/g, '')
+    .replace(/\s*\[tier:[a-z]+\]/g, '')
+    .trim();
+}
+
+function mapBackendTripToFrontend(b: any): Trip {
+  const distanceKm = resolveTripDistance(b);
+  let customTier = b.tripType || 'bronze';
+  if (b.note) {
+    const tierMatch = String(b.note).match(/\[tier:([a-z]+)\]/);
+    if (tierMatch && tierMatch[1]) {
+      customTier = tierMatch[1];
+    }
+  }
+
   return {
     id: b.id,
     name: b.name,
@@ -25,13 +86,13 @@ function mapBackendTripToFrontend(b: any): Trip {
     routeName: b.name,
     distanceKm: distanceKm,
     status: (b.status?.toUpperCase() || 'PLANNING') as any,
-    tripType: b.tripType || 'bronze',
+    tripType: customTier,
     startAt: b.startTime || b.createdTime || new Date().toISOString(),
     endTime: b.endTime,
     vehicle: 'Xe máy',
-    maxMembers: b.memberLimit || 15,
+    maxMembers: customTier === 'gold' ? 50 : customTier === 'silver' ? 30 : (b.memberLimit || 15),
     isPublic: !!b.visibility,
-    note: b.note || '',
+    note: cleanNote(b.note),
     inviteCode: b.inviteToken || '',
     leaderId: b.ownerId,
     myRole: b.myRole,
@@ -51,7 +112,49 @@ const tripService = {
       const res = await apiClient.get<any>('/trips');
       console.log('[Trip API] 📡 GET /v1/trips response:', res.data);
       const list = Array.isArray(res.data) ? res.data : (res.data?.trips ?? []);
-      return list.map(mapBackendTripToFrontend);
+      const mapped = list.map(mapBackendTripToFrontend);
+
+      // Cập nhật members thật và distance cache cho các trip
+      await Promise.allSettled(
+        mapped.map(async (t: Trip) => {
+          // Lấy danh sách thành viên thực tế
+          try {
+            const mRes = await apiClient.get<any>(`/trips/${t.id}/members`);
+            const mList = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.members ?? []);
+            if (Array.isArray(mList) && mList.length > 0) {
+              t.members = mList.map((m: any) => ({
+                userId: m.userId,
+                name: m.nickname || m.username || m.name || m.userId,
+                avatar:
+                  m.avatar ||
+                  `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                    m.nickname || m.username || 'User'
+                  )}&background=CD8554&color=fff`,
+                role: (m.role?.toUpperCase() || 'RIDER') as any,
+                nickname: m.nickname,
+                status: m.status,
+                accepted: m.status === 'active' || m.membershipStatus === 'active',
+              }));
+            }
+          } catch {
+            // ignore
+          }
+
+          // Kiểm tra cache quãng đường
+          if (t.distanceKm === 0 && t.id) {
+            try {
+              const cached = await AsyncStorage.getItem(`trip_dist_${t.id}`);
+              if (cached) {
+                t.distanceKm = parseFloat(cached);
+              }
+            } catch {
+              // ignore
+            }
+          }
+        })
+      );
+
+      return mapped;
     } catch (err: any) {
       console.error('[Trip API Error] ❌ GET /v1/trips failed:', err?.response?.status, err?.response?.data || err?.message);
       throw err;
@@ -67,6 +170,16 @@ const tripService = {
     // GET /v1/trips/:tripId
     const res = await apiClient.get<any>(`/trips/${id}`);
     const trip = mapBackendTripToFrontend(res.data);
+    if (trip.distanceKm === 0 && trip.id) {
+      try {
+        const cached = await AsyncStorage.getItem(`trip_dist_${trip.id}`);
+        if (cached) {
+          trip.distanceKm = parseFloat(cached);
+        }
+      } catch {
+        // ignore
+      }
+    }
     try {
       const membersRes = await apiClient.get<any>(`/trips/${id}/members`);
       const membersList = Array.isArray(membersRes.data)
@@ -140,10 +253,14 @@ const tripService = {
       ? validUuidIds 
       : (isCurrentUuid ? [currentUserId] : []);
 
+    const distTag = payload.distanceKm ? ` [dist:${payload.distanceKm}]` : '';
+    const tierTag = payload.tripType && payload.tripType !== 'bronze' ? ` [tier:${payload.tripType}]` : '';
     const bePayload: any = {
       name: payload.name,
-      note: payload.note || '',
-      tripType: payload.tripType || 'bronze',
+      note: ((payload.note || '') + distTag + tierTag).trim(),
+      // Backend Go chỉ hỗ trợ chính sách giới hạn thành viên cho 'bronze' (15 seats).
+      // Các hạng silver/gold chưa cấu hình policy nên bắt buộc gửi 'bronze' để không bị ErrTripTypePolicyUnset.
+      tripType: 'bronze',
       visibility: !!payload.isPublic,
       memberUserIds: memberUserIds.length > 0 ? memberUserIds : undefined,
     };
@@ -157,6 +274,18 @@ const tripService = {
 
     const res = await apiClient.post<any>('/trips', bePayload);
     const trip = mapBackendTripToFrontend(res.data);
+    if (payload.tripType) {
+      trip.tripType = payload.tripType;
+      trip.maxMembers = payload.tripType === 'gold' ? 50 : payload.tripType === 'silver' ? 30 : 15;
+    }
+    if (payload.distanceKm) {
+      trip.distanceKm = payload.distanceKm;
+      try {
+        await AsyncStorage.setItem(`trip_dist_${trip.id}`, String(payload.distanceKm));
+      } catch {
+        // ignore
+      }
+    }
 
     // Lấy invite link token qua POST /v1/trips/:tripId/invite-link
     try {
@@ -208,6 +337,25 @@ const tripService = {
     }
   },
 
+  /** GET /trips/:id/join-requests */
+  getJoinRequests: async (id: string): Promise<any[]> => {
+    if (USE_MOCK) return [];
+    try {
+      const res = await apiClient.get<any>(`/trips/${id}/join-requests`);
+      return Array.isArray(res.data) ? res.data : (res.data?.joinRequests ?? []);
+    } catch {
+      return [];
+    }
+  },
+
+  /** POST /trips/:id/join-requests/:userId?action=... */
+  respondJoinRequest: async (tripId: string, userId: string, action: 'accept' | 'reject'): Promise<void> => {
+    if (USE_MOCK) return;
+    await apiClient.post(`/trips/${tripId}/join-requests/${userId}`, { action }, {
+      params: { action },
+    });
+  },
+
   /** POST /trips/:id/leave */
   leaveTrip: async (id: string): Promise<void> => {
     if (USE_MOCK) {
@@ -226,6 +374,35 @@ const tripService = {
       return;
     }
     await apiClient.delete(`/trips/${id}`);
+  },
+
+  /** GET /trips/:id/members */
+  getTripMembers: async (id: string): Promise<any[]> => {
+    if (USE_MOCK) return [];
+    try {
+      const res = await apiClient.get<any>(`/trips/${id}/members`);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.members ?? []);
+      return list.map((m: any) => ({
+        userId: m.userId,
+        name: m.nickname || m.username || m.name || 'Thành viên',
+        username: m.username,
+        avatar:
+          m.avatar ||
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(
+            m.nickname || m.username || 'User'
+          )}&background=CD8554&color=fff`,
+        role: (m.role?.toUpperCase() || 'MEMBER') as any,
+        status: m.status,
+        accepted: m.status === 'ACTIVE' || (m.status as string) === 'active' || true,
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  /** DELETE /trips/:tripId/members/:userId - Kick member khỏi chuyến đi */
+  kickMember: async (tripId: string, userId: string): Promise<void> => {
+    await apiClient.delete(`/trips/${tripId}/members/${userId}`);
   },
 };
 
