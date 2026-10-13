@@ -31,6 +31,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, CreateTripScreenNavigationProp } from '../../types/navigation';
 import { useTripStore } from '../../store/useTripStore';
+import QRCode from 'react-native-qrcode-svg';
+import friendService, { FriendItem } from '../../services/api/friendService';
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -161,7 +163,7 @@ const CreateTripScreen = () => {
   useEffect(() => {
     if (route.params?.customRoute) {
       const cr = route.params.customRoute;
-      setSelectedRoute(cr);
+      setSelectedRoute({ ...cr, isCustomRoute: true, isPastTrip: false });
       if (!tripName) {
         setTripName(cr.name);
       }
@@ -180,15 +182,36 @@ const CreateTripScreen = () => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tripType, setTripType] = useState<TripTypeKey>('bronze');
 
-  // Step 2 state
+  // Step 2 state (Mời bạn bè)
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [searchFriend, setSearchFriend] = useState('');
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(false);
+  const [friendError, setFriendError] = useState<string | null>(null);
 
-  // Step 3 result
+  // Step 3 result (Hoàn tất + QR Code)
   const [createdInviteCode, setCreatedInviteCode] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const currentTripId = useTripStore((s: any) => s.currentTripId);
   const createTrip = useTripStore((s: any) => s.createTrip);
+
+  const loadFriends = async () => {
+    setLoadingFriends(true);
+    setFriendError(null);
+    try {
+      const res = await friendService.getFriends();
+      setFriends(res.friends || []);
+    } catch {
+      setFriendError('Không thể tải danh sách bạn bè.');
+    } finally {
+      setLoadingFriends(false);
+    }
+  };
+
+  useEffect(() => {
+    loadFriends();
+  }, []);
 
   // ── Navigation helpers ──
   const goNext = () => setStep((s) => Math.min(s + 1, 3));
@@ -205,13 +228,20 @@ const CreateTripScreen = () => {
 
   const handleCreate = async () => {
     if (!selectedRoute) return;
+    if (selectedFriends.length === 0) {
+      Alert.alert(
+        'Chưa chọn bạn bè',
+        'Theo quy định hệ thống, chuyến đi cần có ít nhất 1 bạn bè cùng tham gia. Vui lòng chọn ít nhất 1 bạn từ danh sách.'
+      );
+      return;
+    }
     setIsCreating(true);
     try {
       const payload = {
         name: tripName || selectedRoute.name,
         routeId: selectedRoute.id,
         routeName: selectedRoute.name,
-        distanceKm: parseInt(selectedRoute.distance) || 0,
+        distanceKm: parseInt(selectedRoute.distance) || selectedRoute.distanceKm || 0,
         startAt: new Date().toISOString(),
         vehicle: vehicle as any,
         tripType,
@@ -242,7 +272,12 @@ const CreateTripScreen = () => {
   // ═══════════════════════════════════════════════════════════════════════════
   const renderStep0 = () => {
     // ── Trường hợp 1: Đã có lộ trình vừa tạo từ bản đồ (customRoute) ──
-    if (selectedRoute && ((selectedRoute as any).waypoints || (selectedRoute as any).stopsCount !== undefined)) {
+    const isCustomRouteFromMap =
+      selectedRoute &&
+      !selectedRoute.isPastTrip &&
+      (selectedRoute.isCustomRoute === true || (Array.isArray(selectedRoute.waypoints) && selectedRoute.waypoints.length > 0));
+
+    if (isCustomRouteFromMap) {
       const cr = selectedRoute as any;
       return (
         <View style={styles.customRouteContainer}>
@@ -301,7 +336,7 @@ const CreateTripScreen = () => {
             </View>
 
             {/* Các điểm dừng */}
-            {cr.stops?.map((s: any, idx: number) => (
+            {Array.isArray(cr.stops) && cr.stops.map((s: any, idx: number) => (
               <View key={s.place_id || idx} style={styles.timelineRow}>
                 <View style={styles.timelineLeft}>
                   <View style={[styles.timelineDot, { backgroundColor: C.primary }]} />
@@ -392,19 +427,25 @@ const CreateTripScreen = () => {
                   key={t.id}
                   style={[styles.routeCard, isSelected && styles.routeCardActive]}
                   activeOpacity={0.85}
-                  onPress={() =>
+                  onPress={() => {
+                    const stopsCnt = Array.isArray(t.stops)
+                      ? t.stops.length
+                      : (typeof t.stops === 'number' ? t.stops : 0);
                     setSelectedRoute({
                       id: t.id,
                       name: t.name || t.routeName,
                       distance: `${t.distanceKm || 0} km`,
                       distanceKm: t.distanceKm || 0,
                       duration: t.duration || `${Math.max(15, Math.round(((t.distanceKm || 10) / 35) * 60))} phút`,
-                      stops: t.stops?.length || 0,
-                      stopsCount: t.stops?.length || 0,
+                      stops: Array.isArray(t.stops) ? t.stops : [],
+                      stopsCount: stopsCnt,
                       image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
                       isPastTrip: true,
-                    })
-                  }
+                    });
+                    if (!tripName) {
+                      setTripName(t.name || t.routeName);
+                    }
+                  }}
                 >
                   <Image
                     source={{
@@ -660,73 +701,122 @@ const CreateTripScreen = () => {
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 2 — Mời bạn bè
     // ═══════════════════════════════════════════════════════════════════════════
-    const renderStep2 = () => (
-      <>
-        <Text style={styles.stepHeading}>Mời bạn bè</Text>
-        <Text style={styles.stepSub}>
-          Chọn bạn từ danh sách để mời vào chuyến đi ngay.
-          {'\n'}Bạn cũng có thể share link sau khi tạo xong.
-        </Text>
+    const renderStep2 = () => {
+      const filteredFriends = friends.filter((f) =>
+        f.username.toLowerCase().includes(searchFriend.toLowerCase())
+      );
 
-        {/* Thanh tìm kiếm */}
-        <View style={[styles.inputBox, { marginBottom: 16 }]}>
-          <Ionicons name="search-outline" size={20} color={C.sub} style={{ marginRight: 8 }} />
-          <TextInput
-            style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0 }]}
-            placeholder="Tìm kiếm bạn bè..."
-            placeholderTextColor={C.border}
-            value={searchFriend}
-            onChangeText={setSearchFriend}
-          />
-        </View>
+      return (
+        <>
+          <Text style={styles.stepHeading}>Mời bạn bè</Text>
+          <Text style={styles.stepSub}>
+            Chọn bạn từ danh sách bạn bè để cùng tham gia chuyến đi.
+            {'\n'}Hệ thống yêu cầu chuyến đi cần có ít nhất 1 bạn bè tham gia.
+          </Text>
 
-        {selectedFriends.length > 0 && (
-          <View style={styles.selectedChipsRow}>
-            {selectedFriends.map((id) => {
-              const f = MOCK_FRIENDS.find((fr) => fr.id === id)!;
+          {/* Thanh tìm kiếm */}
+          <View style={[styles.inputBox, { marginBottom: 16 }]}>
+            <Ionicons name="search-outline" size={20} color={C.sub} style={{ marginRight: 8 }} />
+            <TextInput
+              style={[styles.textInput, { marginBottom: 0, flex: 1, borderWidth: 0, padding: 0 }]}
+              placeholder="Tìm kiếm bạn bè theo tên..."
+              placeholderTextColor={C.border}
+              value={searchFriend}
+              onChangeText={setSearchFriend}
+            />
+            {searchFriend.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchFriend('')}>
+                <Ionicons name="close-circle" size={18} color={C.sub} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Selected chips row */}
+          {selectedFriends.length > 0 && (
+            <View style={styles.selectedChipsRow}>
+              {selectedFriends.map((id) => {
+                const f = friends.find((fr) => fr.userId === id);
+                if (!f) return null;
+                const avatarUri = f.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(f.username)}&background=CD8554&color=fff`;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    style={styles.selectedChip}
+                    onPress={() => toggleFriend(id)}
+                  >
+                    <Image source={{ uri: avatarUri }} style={styles.chipAvatar} />
+                    <Text style={styles.chipName}>@{f.username}</Text>
+                    <Ionicons name="close" size={12} color={C.sub} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Danh sách bạn bè */}
+          {loadingFriends ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="small" color={C.primary} />
+              <Text style={styles.loadingText}>Đang tải danh sách bạn bè...</Text>
+            </View>
+          ) : friendError ? (
+            <View style={styles.emptyBox}>
+              <Ionicons name="alert-circle-outline" size={36} color={C.primary} />
+              <Text style={styles.emptyTitle}>Lỗi tải bạn bè</Text>
+              <Text style={styles.emptySub}>{friendError}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={loadFriends}>
+                <Text style={styles.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : friends.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="people-outline" size={36} color={C.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>Chưa có bạn bè nào</Text>
+              <Text style={styles.emptySub}>
+                Bạn chưa kết bạn với ai trong hệ thống. Hãy kết bạn trước để có thể tạo chuyến đi nhóm nhé!
+              </Text>
+            </View>
+          ) : filteredFriends.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>Không tìm thấy kết quả</Text>
+              <Text style={styles.emptySub}>Không có bạn bè nào khớp với từ khóa "{searchFriend}".</Text>
+            </View>
+          ) : (
+            filteredFriends.map((friend) => {
+              const selected = selectedFriends.includes(friend.userId);
+              const avatarUri = friend.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.username)}&background=CD8554&color=fff`;
               return (
                 <TouchableOpacity
-                  key={id}
-                  style={styles.selectedChip}
-                  onPress={() => toggleFriend(id)}
+                  key={friend.userId}
+                  style={[styles.friendRow, selected && styles.friendRowSelected]}
+                  activeOpacity={0.75}
+                  onPress={() => toggleFriend(friend.userId)}
                 >
-                  <Image source={{ uri: f.avatar }} style={styles.chipAvatar} />
-                  <Text style={styles.chipName}>{f.name.split(' ').pop()}</Text>
-                  <Ionicons name="close" size={12} color={C.sub} />
+                  <Image source={{ uri: avatarUri }} style={styles.friendAvatar} />
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName}>@{friend.username}</Text>
+                    <Text style={styles.friendUsername}>Bạn bè</Text>
+                  </View>
+                  <View style={[styles.checkCircle, selected && styles.checkCircleActive]}>
+                    {selected && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                  </View>
                 </TouchableOpacity>
               );
-            })}
-          </View>
-        )}
-
-        {MOCK_FRIENDS.filter(f => f.name.toLowerCase().includes(searchFriend.toLowerCase())).map((friend) => {
-          const selected = selectedFriends.includes(friend.id);
-          return (
-            <TouchableOpacity
-              key={friend.id}
-              style={[styles.friendRow, selected && styles.friendRowSelected]}
-              activeOpacity={0.75}
-              onPress={() => toggleFriend(friend.id)}
-            >
-              <Image source={{ uri: friend.avatar }} style={styles.friendAvatar} />
-              <View style={styles.friendInfo}>
-                <Text style={styles.friendName}>{friend.name}</Text>
-                <Text style={styles.friendUsername}>{friend.username}</Text>
-              </View>
-              <View style={[styles.checkCircle, selected && styles.checkCircleActive]}>
-                {selected && <Ionicons name="checkmark" size={14} color="#FFF" />}
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </>
-    );
+            })
+          )}
+        </>
+      );
+    };
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STEP 3 — Hoàn tất
     // ═══════════════════════════════════════════════════════════════════════════
     const renderStep3 = () => {
-      const invitedFriends = MOCK_FRIENDS.filter((f) => selectedFriends.includes(f.id));
+      const invitedFriends = friends.filter((f) => selectedFriends.includes(f.userId));
+      const qrPayload = `road2d://join/${createdInviteCode}?tripId=${currentTripId || ''}`;
+
       return (
         <>
           {/* Success icon */}
@@ -738,6 +828,20 @@ const CreateTripScreen = () => {
             <Text style={styles.successSub}>
               {selectedRoute?.name ?? 'Chuyến đi'} · {selectedRoute?.distance}
             </Text>
+          </View>
+
+          {/* QR Code Preview Card */}
+          <View style={styles.qrCard}>
+            <Text style={styles.qrCardTitle}>MÃ QR CHUYẾN ĐI</Text>
+            <Text style={styles.qrCardSub}>Bạn bè có thể quét mã này từ camera để tham gia ngay</Text>
+            <View style={styles.qrWrapper}>
+              <QRCode
+                value={qrPayload}
+                size={160}
+                color={C.heading}
+                backgroundColor="#FFF"
+              />
+            </View>
           </View>
 
           {/* Invite code */}
@@ -753,18 +857,21 @@ const CreateTripScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Share link */}
+          {/* Share link & Xem QR Fullsize */}
           <View style={styles.shareRow}>
-            <TouchableOpacity style={styles.shareBtn} onPress={() => Alert.alert('Chia sẻ link', 'https://road2d.app/join/' + createdInviteCode)}>
+            <TouchableOpacity
+              style={styles.shareBtn}
+              onPress={() => Alert.alert('Chia sẻ link', `https://road2d.app/join/${createdInviteCode}`)}
+            >
               <Feather name="share-2" size={18} color="#FFF" />
               <Text style={styles.shareBtnText}>Chia sẻ link</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.shareBtn, { backgroundColor: C.card, borderWidth: 1.5, borderColor: C.primary }]}
-              onPress={() => Alert.alert('QR Code', 'QR code sẽ hiển thị ở đây trong bản chính thức.')}
+              onPress={() => setShowQrModal(true)}
             >
               <MaterialCommunityIcons name="qrcode" size={18} color={C.primary} />
-              <Text style={[styles.shareBtnText, { color: C.primary }]}>Xem QR</Text>
+              <Text style={[styles.shareBtnText, { color: C.primary }]}>Xem QR lớn</Text>
             </TouchableOpacity>
           </View>
 
@@ -772,17 +879,35 @@ const CreateTripScreen = () => {
           {invitedFriends.length > 0 && (
             <View style={styles.invitedSection}>
               <Text style={styles.invitedTitle}>Đã mời ({invitedFriends.length} người)</Text>
-              {invitedFriends.map((f) => (
-                <View key={f.id} style={styles.invitedRow}>
-                  <Image source={{ uri: f.avatar }} style={styles.invitedAvatar} />
-                  <Text style={styles.invitedName}>{f.name}</Text>
-                  <View style={styles.invitedStatus}>
-                    <Text style={styles.invitedStatusText}>Đang chờ xác nhận</Text>
+              {invitedFriends.map((f) => {
+                const avatarUri = f.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(f.username)}&background=CD8554&color=fff`;
+                return (
+                  <View key={f.userId} style={styles.invitedRow}>
+                    <Image source={{ uri: avatarUri }} style={styles.invitedAvatar} />
+                    <Text style={styles.invitedName}>@{f.username}</Text>
+                    <View style={styles.invitedStatus}>
+                      <Text style={styles.invitedStatusText}>Đang chờ xác nhận</Text>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
+
+          {/* Xem chi tiết chuyến đi */}
+          <TouchableOpacity
+            style={[styles.rosterBtn, { backgroundColor: C.primary, borderColor: C.primary, marginBottom: 10 }]}
+            onPress={() => {
+              if (currentTripId) {
+                navigation.navigate('TripDetails', { tripId: currentTripId });
+              } else {
+                navigation.navigate('Home');
+              }
+            }}
+          >
+            <Text style={[styles.rosterBtnText, { color: '#FFF' }]}>Xem chi tiết chuyến đi</Text>
+            <Feather name="arrow-right" size={16} color="#FFF" />
+          </TouchableOpacity>
 
           {/* Go to team roster */}
           <TouchableOpacity
@@ -796,8 +921,61 @@ const CreateTripScreen = () => {
             }}
           >
             <Text style={styles.rosterBtnText}>Xem danh sách thành viên</Text>
-            <Feather name="arrow-right" size={16} color={C.primary} />
+            <Feather name="users" size={16} color={C.primary} />
           </TouchableOpacity>
+
+          {/* Return Home */}
+          <TouchableOpacity
+            style={[styles.rosterBtn, { backgroundColor: 'transparent', borderColor: 'transparent', marginTop: 4 }]}
+            onPress={() => navigation.navigate('Home')}
+          >
+            <Text style={[styles.rosterBtnText, { color: C.sub }]}>Về trang chủ</Text>
+          </TouchableOpacity>
+
+          {/* Modal xem mã QR lớn */}
+          <Modal
+            visible={showQrModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowQrModal(false)}
+          >
+            <View style={styles.qrModalBackdrop}>
+              <View style={styles.qrModalBox}>
+                <TouchableOpacity
+                  style={styles.qrModalCloseBtn}
+                  onPress={() => setShowQrModal(false)}
+                >
+                  <Ionicons name="close" size={24} color={C.sub} />
+                </TouchableOpacity>
+
+                <Text style={styles.qrModalTitle}>Mã QR Chuyến Đi</Text>
+                <Text style={styles.qrModalTripName}>{tripName || selectedRoute?.name}</Text>
+
+                <View style={styles.qrModalImageWrap}>
+                  <QRCode
+                    value={qrPayload}
+                    size={220}
+                    color={C.heading}
+                    backgroundColor="#FFF"
+                  />
+                </View>
+
+                <View style={styles.qrModalCodePill}>
+                  <Text style={styles.qrModalCodeText}>{createdInviteCode}</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.qrModalCopyBtn}
+                  onPress={() => {
+                    Alert.alert('Đã sao chép!', `Mã mời ${createdInviteCode} đã được sao chép.`);
+                  }}
+                >
+                  <Feather name="copy" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.qrModalCopyBtnText}>Sao chép mã mời</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         </>
       );
     };
@@ -819,6 +997,13 @@ const CreateTripScreen = () => {
         return;
       }
       if (step === 2) {
+        if (selectedFriends.length === 0) {
+          Alert.alert(
+            'Chưa chọn bạn bè',
+            'Theo quy định hệ thống, chuyến đi cần có ít nhất 1 bạn bè cùng tham gia. Vui lòng chọn ít nhất 1 bạn từ danh sách.'
+          );
+          return;
+        }
         if (!isCreating) handleCreate();
         return;
       }
@@ -902,17 +1087,23 @@ const CreateTripScreen = () => {
                       key={t.id}
                       style={[styles.modalTripItem, isSelected && styles.modalTripItemSelected]}
                       onPress={() => {
+                        const stopsCnt = Array.isArray(t.stops)
+                          ? t.stops.length
+                          : (typeof t.stops === 'number' ? t.stops : 0);
                         setSelectedRoute({
                           id: t.id,
                           name: t.name || t.routeName,
                           distance: `${t.distanceKm || 0} km`,
                           distanceKm: t.distanceKm || 0,
                           duration: t.duration || `${Math.max(15, Math.round(((t.distanceKm || 10) / 35) * 60))} phút`,
-                          stops: t.stops?.length || 0,
-                          stopsCount: t.stops?.length || 0,
+                          stops: Array.isArray(t.stops) ? t.stops : [],
+                          stopsCount: stopsCnt,
                           image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
                           isPastTrip: true,
                         });
+                        if (!tripName) {
+                          setTripName(t.name || t.routeName);
+                        }
                         setShowAllTripsModal(false);
                       }}
                     >
@@ -1285,6 +1476,43 @@ const CreateTripScreen = () => {
     successTitle: { fontSize: 22, fontWeight: '800', color: C.heading, marginBottom: 4 },
     successSub: { fontSize: 14, color: C.sub },
 
+    qrCard: {
+      backgroundColor: C.card,
+      borderRadius: 18,
+      padding: 20,
+      alignItems: 'center',
+      borderWidth: 1.5,
+      borderColor: '#E8D0BC',
+      marginBottom: 14,
+      shadowColor: C.heading,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    qrCardTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: C.primaryDark,
+      letterSpacing: 1.2,
+      marginBottom: 4,
+    },
+    qrCardSub: {
+      fontSize: 12.5,
+      color: C.sub,
+      textAlign: 'center',
+      marginBottom: 16,
+    },
+    qrWrapper: {
+      padding: 12,
+      backgroundColor: '#FFF',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#EFE6DE',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
     inviteCard: {
       backgroundColor: C.card,
       borderRadius: 18,
@@ -1371,6 +1599,110 @@ const CreateTripScreen = () => {
       borderRadius: 14,
     },
     rosterBtnText: { fontSize: 14, fontWeight: '700', color: C.primary },
+
+    // QR Modal Styles
+    qrModalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    qrModalBox: {
+      backgroundColor: C.card,
+      borderRadius: 24,
+      paddingVertical: 28,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+      width: '100%',
+      maxWidth: 340,
+      position: 'relative',
+      ...Platform.select({
+        ios: {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 10,
+        },
+        android: {
+          elevation: 6,
+        },
+      }),
+    },
+    qrModalCloseBtn: {
+      position: 'absolute',
+      top: 16,
+      right: 16,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: '#FAF5EE',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    qrModalTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: C.heading,
+      marginBottom: 4,
+    },
+    qrModalTripName: {
+      fontSize: 14,
+      color: C.sub,
+      textAlign: 'center',
+      marginBottom: 20,
+    },
+    qrModalImageWrap: {
+      padding: 16,
+      backgroundColor: '#FFF',
+      borderRadius: 16,
+      borderWidth: 1.5,
+      borderColor: '#EFE6DE',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 18,
+    },
+    qrModalCodePill: {
+      backgroundColor: '#FAF5EE',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: C.border,
+      marginBottom: 20,
+    },
+    qrModalCodeText: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: C.heading,
+      letterSpacing: 2,
+    },
+    qrModalCopyBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.primary,
+      width: '100%',
+      paddingVertical: 13,
+      borderRadius: 14,
+    },
+    qrModalCopyBtnText: {
+      color: '#FFF',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    retryBtn: {
+      marginTop: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 8,
+      backgroundColor: C.primary,
+      borderRadius: 10,
+    },
+    retryBtnText: {
+      color: '#FFF',
+      fontSize: 13,
+      fontWeight: '700',
+    },
 
     // Bottom bar
     bottomBar: {

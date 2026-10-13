@@ -1,282 +1,1142 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import type { TripDetailsScreenNavigationProp } from '../../types/navigation';
-import { colors } from '../../theme/colors';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  Platform,
+  StatusBar,
+  ActivityIndicator,
+  Alert,
+  Share,
+  Modal,
+  RefreshControl,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import QRCode from 'react-native-qrcode-svg';
 
-const TIMELINE_DATA = [
-  { id: '1', title: 'Km 0: Xuất phát', desc: 'Hà Giang', type: 'start' },
-  { id: '2', title: 'Km 46: Cây xăng Quản Bạ', desc: '[Mở 6h-22h]', type: 'stop' },
-  { id: '3', title: 'Km 55: Cổng Trời Quản Bạ', desc: '[Nghỉ 15-30p] ⭐4.9', type: 'photo' },
-  { id: '4', title: 'Km 85: Quán Phở Yên Minh', desc: '[Recommended] Phở gà 35k', type: 'food' },
-  { id: '5', title: 'Km 165: Đèo Mã Pì Lèng', desc: '⚠️ Đường hẹp, đi chậm', type: 'warning' },
-];
+import type { TripDetailsScreenNavigationProp, TripDetailsRouteProp } from '../../types/navigation';
+import type { Trip } from '../../types';
+import tripService from '../../services/api/tripService';
+import { useTripStore } from '../../store/useTripStore';
+import { useAuthStore } from '../../store/useAuthStore';
+
+// ─── Theme Tokens (Tuân thủ UI_GUIDELINES.md) ─────────────────────────────────
+const C = {
+  primary: '#CD8554',
+  primaryDark: '#A85A32',
+  heading: '#5D3A29',
+  text: '#3E2723',
+  sub: '#6D4C41',
+  bg: '#FDFBF7',
+  card: '#FFFFFF',
+  border: '#E8D0BC',
+  borderLight: '#F0E6DE',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  danger: '#D32F2F',
+  dangerBg: '#FFEBEE',
+};
+
+function formatTripDate(isoString?: string): string {
+  if (!isoString) return 'Chưa định ngày';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'Chưa định ngày';
+    return d.toLocaleDateString('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return 'Chưa định ngày';
+  }
+}
 
 const TripDetailsScreen = () => {
   const navigation = useNavigation<TripDetailsScreenNavigationProp>();
-  const [activeTab, setActiveTab] = useState('Tổng quan');
-  const [isSaved, setIsSaved] = useState(false);
+  const route = useRoute<TripDetailsRouteProp>();
+  const tripId = route.params?.tripId;
 
-  const renderTabs = () => {
-    const tabs = ['Tổng quan', 'Điểm dừng', 'Plan', 'Review', 'Thời tiết'];
-    return (
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll}>
-        {tabs.map((tab) => (
-          <TouchableOpacity 
-            key={tab} 
-            style={[styles.tab, activeTab === tab && styles.activeTab]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const leaveTripInStore = useTripStore((s) => s.leaveTrip);
+  const deleteTripInStore = useTripStore((s) => s.deleteTrip);
+
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+
+  const fetchTripDetail = useCallback(async () => {
+    if (!tripId) {
+      setError('Thiếu mã định danh chuyến đi.');
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      const data = await tripService.getTripById(tripId);
+      if (!data) {
+        setError('Không tìm thấy thông tin chuyến đi này.');
+      } else {
+        setTrip(data);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Không thể tải thông tin chuyến đi.';
+      setError(msg);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [tripId]);
+
+  useEffect(() => {
+    fetchTripDetail();
+  }, [fetchTripDetail]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchTripDetail();
+  }, [fetchTripDetail]);
+
+  const handleShare = async () => {
+    if (!trip) return;
+    try {
+      const inviteMsg = trip.inviteCode
+        ? `\nMã mời tham gia: ${trip.inviteCode}\nLink tham gia: road2d://join/${trip.inviteCode}`
+        : '';
+      await Share.share({
+        message: `Tham gia chuyến đi "${trip.name}" trên Road2D cùng mình!${inviteMsg}`,
+      });
+    } catch (err: any) {
+      Alert.alert('Chia sẻ', err?.message || 'Không thể chia sẻ chuyến đi.');
+    }
+  };
+
+  const isLeader = trip?.leaderId === currentUserId || trip?.myRole === 'leader';
+
+  const handleLeaveTrip = () => {
+    if (!trip) return;
+    Alert.alert(
+      'Rời chuyến đi',
+      isLeader
+        ? 'Bạn là Trưởng đoàn. Nếu bạn rời đi, quyền trưởng đoàn sẽ chuyển cho thành viên tiếp theo (hoặc huỷ nếu không còn ai). Bạn có chắc chắn muốn rời?'
+        : 'Bạn có chắc chắn muốn rời khỏi chuyến đi này không?',
+      [
+        { text: 'Huỷ', style: 'cancel' },
+        {
+          text: 'Rời chuyến đi',
+          style: 'destructive',
+          onPress: async () => {
+            setIsActionLoading(true);
+            try {
+              await leaveTripInStore(trip.id);
+              Alert.alert('Thành công', 'Bạn đã rời khỏi chuyến đi.', [
+                { text: 'OK', onPress: () => navigation.navigate('Home') },
+              ]);
+            } catch (err: any) {
+              const msg = err?.response?.data?.message || 'Không thể rời chuyến đi.';
+              Alert.alert('Lỗi', msg);
+            } finally {
+              setIsActionLoading(false);
+            }
+          },
+        },
+      ]
     );
   };
 
-  const renderTongQuan = () => (
-    <View style={styles.tabContent}>
-      <Text style={styles.sectionTitle}>Mô tả tuyến</Text>
-      <Text style={styles.descText}>Cung đường huyền thoại của núi rừng Đông Bắc, cảnh sắc hùng vĩ, những đoạn đèo uốn lượn liên tục.</Text>
-      
-      <View style={styles.warningBox}>
-        <Text style={styles.warningTitle}>⚠️ Cảnh báo đặc biệt</Text>
-        <Text style={styles.warningText}>Đoạn Đồng Văn - Mèo Vạc nhiều đá dăm mùa mưa, sương mù dày đặc vào sáng sớm.</Text>
-      </View>
+  const handleDeleteTrip = () => {
+    if (!trip) return;
+    Alert.alert(
+      'Huỷ chuyến đi',
+      'Hành động này sẽ xoá hoàn toàn chuyến đi khỏi hệ thống và không thể khôi phục. Bạn có chắc chắn muốn huỷ chuyến đi này không?',
+      [
+        { text: 'Quay lại', style: 'cancel' },
+        {
+          text: 'Huỷ chuyến',
+          style: 'destructive',
+          onPress: async () => {
+            setIsActionLoading(true);
+            try {
+              await deleteTripInStore(trip.id);
+              Alert.alert('Thành công', 'Chuyến đi đã được huỷ.', [
+                { text: 'OK', onPress: () => navigation.navigate('Home') },
+              ]);
+            } catch (err: any) {
+              const msg = err?.response?.data?.message || 'Không thể huỷ chuyến đi.';
+              Alert.alert('Lỗi', msg);
+            } finally {
+              setIsActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
-      <Text style={styles.sectionTitle}>Loại xe phù hợp</Text>
-      <View style={styles.tagsRow}>
-        <Text style={styles.vehicleTag}>✓ Xe số</Text>
-        <Text style={styles.vehicleTag}>✓ Côn tay</Text>
-        <Text style={[styles.vehicleTag, { color: '#FF9800', backgroundColor: '#FFF3E0' }]}>⚠️ Tay ga</Text>
-      </View>
+  // ── Render Loading State ──────────────────────────────────────────────────
+  if (loading && !trip) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
+            <Feather name="arrow-left" size={24} color={C.heading} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Chi tiết chuyến đi</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color={C.primary} />
+          <Text style={styles.loadingText}>Đang tải dữ liệu từ máy chủ...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-      <Text style={styles.sectionTitle}>Chi phí ước tính</Text>
-      <View style={styles.costBox}>
-        <Text style={styles.costItem}>⛽ Xăng: ~180k</Text>
-        <Text style={styles.costItem}>🏨 Khách sạn: ~300k/đêm</Text>
-        <Text style={styles.costItem}>🍜 Ăn uống: ~150k/ngày</Text>
-      </View>
-    </View>
-  );
-
-  const renderDiemDung = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.timelineContainer}>
-        {TIMELINE_DATA.map((item, index) => (
-          <View key={item.id} style={styles.timelineItem}>
-            <View style={styles.timelineLeft}>
-              <View style={[styles.timelineDot, item.type === 'start' ? styles.dotPrimary : item.type === 'warning' ? styles.dotWarning : {}]} />
-              {index < TIMELINE_DATA.length - 1 && <View style={styles.timelineLine} />}
-            </View>
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineTitle}>{item.title}</Text>
-              <Text style={styles.timelineDesc}>{item.desc}</Text>
-            </View>
+  // ── Render Error State ────────────────────────────────────────────────────
+  if (error && !trip) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
+            <Feather name="arrow-left" size={24} color={C.heading} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Chi tiết chuyến đi</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.centerBox}>
+          <View style={styles.errorIconWrap}>
+            <Ionicons name="alert-circle-outline" size={48} color={C.primary} />
           </View>
-        ))}
-      </View>
-    </View>
-  );
-
-  const renderReview = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.reviewOverview}>
-        <Text style={styles.ratingBig}>4.8</Text>
-        <View style={styles.stars}>
-          <Text style={styles.starText}>⭐⭐⭐⭐⭐</Text>
-          <Text style={styles.reviewCount}>Dựa trên 247 đánh giá</Text>
-        </View>
-      </View>
-      
-      <View style={styles.reviewCard}>
-        <View style={styles.reviewHeader}>
-          <Image source={{ uri: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=150' }} style={styles.reviewerAvatar} />
-          <View>
-            <Text style={styles.reviewerName}>Hoàng Nam</Text>
-            <Text style={styles.reviewMeta}>Xe côn tay • Đi 2 tuần trước</Text>
-          </View>
-        </View>
-        <Text style={styles.reviewText}>Cung đường đẹp tuyệt vời nhưng đèo dốc khá gắt. Khuyên anh em tay lái yếu nên đi chậm đoạn Mèo Vạc. Nên đi vào mùa Thu để ngắm tam giác mạch!</Text>
-        <View style={styles.reviewImages}>
-          <Image source={{ uri: 'https://images.unsplash.com/photo-1627885444654-e67c87c4bfda?q=80&w=300' }} style={styles.reviewImg} />
-          <Image source={{ uri: 'https://images.unsplash.com/photo-1583417319070-4a69db38a482?q=80&w=300' }} style={styles.reviewImg} />
-        </View>
-      </View>
-    </View>
-  );
-
-  const renderWeather = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.weatherAlert}>
-        <Text style={styles.weatherAlertText}>⚠️ Mưa rải rác vào sáng sớm tại Mèo Vạc</Text>
-      </View>
-      
-      {['Hôm nay', 'Ngày mai', 'Ngày mốt'].map((day, idx) => (
-        <View key={idx} style={styles.weatherRow}>
-          <Text style={styles.weatherDay}>{day}</Text>
-          <Ionicons
-            name={idx === 0 ? 'partly-sunny' : 'sunny'}
-            size={28}
-            color={idx === 0 ? '#78909C' : '#FFC107'}
-            style={styles.weatherIcon}
-          />
-          <View style={styles.weatherTemp}>
-            <Text style={styles.tempHigh}>22°</Text>
-            <Text style={styles.tempLow}>16°</Text>
-          </View>
-          <Text style={styles.weatherRain}>{idx === 0 ? '60% mưa' : '10% mưa'}</Text>
-        </View>
-      ))}
-    </View>
-  );
-  const renderPlan = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.planCard}>
-        <Text style={styles.planAuthor}>Tạo bởi: Tuấn Đạt • 3 ngày trước</Text>
-        <Text style={styles.planTitle}>Plan 2 ngày cho nhóm 5 xe côn tay</Text>
-        <Text style={styles.planPreview}>Ngày 1: HG → Đồng Văn (130km){'\n'}Ngày 2: ĐV → Mèo Vạc → HG</Text>
-        <View style={styles.planFooter}>
-          <Text style={styles.planStats}>▲ 247  💬 38  🔀 Fork 12</Text>
-          <TouchableOpacity style={styles.forkBtn}><Text style={styles.forkText}>Fork về dùng</Text></TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-
-  return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-        {/* Header Image */}
-        <View style={styles.imageContainer}>
-          <Image source={{ uri: 'https://images.unsplash.com/photo-1599423423926-17b5db30303a?q=80&w=600' }} style={styles.headerImage} />
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+          <Text style={styles.errorTitle}>Không thể tải chuyến đi</Text>
+          <Text style={styles.errorSub}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={fetchTripDetail}>
+            <Ionicons name="refresh" size={16} color="#FFF" style={{ marginRight: 6 }} />
+            <Text style={styles.retryBtnText}>Thử lại</Text>
           </TouchableOpacity>
         </View>
+      </SafeAreaView>
+    );
+  }
 
-        {/* Info Section */}
-        <View style={styles.infoSection}>
-          <Text style={styles.breadcrumb}>Hà Giang • Tây Bắc</Text>
-          <Text style={styles.title}>Hà Giang Loop</Text>
-          
-          <View style={styles.statsRow}>
-            <Text style={styles.statChip}>🛣️ 285 km</Text>
-            <Text style={styles.statChip}>⏱️ 2-3 ngày</Text>
-            <Text style={styles.statChip}>⭐ 4.8 (247)</Text>
-          </View>
+  if (!trip) {
+    return null;
+  }
 
-          <View style={styles.tagsRow}>
-            <Text style={styles.tagPill}>Khó 🔴</Text>
-            <Text style={styles.tagPill}>Cảnh đẹp 📸</Text>
-            <Text style={styles.tagPill}>Đường núi</Text>
-          </View>
+  const isTripActive = trip.status === 'ACTIVE' || (trip.status as string) === 'active';
+  const qrPayload = `road2d://join/${trip.inviteCode || trip.id}`;
+  const leaderMember = trip.members?.find((m) => m.role === 'LEADER' || (m.role as string) === 'leader');
 
-          <View style={styles.actionsRow}>
-            <TouchableOpacity 
-              style={[styles.saveBtn, isSaved && styles.saveBtnActive]} 
-              onPress={() => setIsSaved(!isSaved)}
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+
+      {/* Header Bar */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
+          <Feather name="arrow-left" size={24} color={C.heading} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          Chi tiết chuyến đi
+        </Text>
+        <TouchableOpacity style={styles.headerBtn} onPress={handleShare}>
+          <Feather name="share-2" size={20} color={C.heading} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[C.primary]} />}
+      >
+        {/* Cover / Hero Card */}
+        <View style={styles.heroCard}>
+          <Image
+            source={{
+              uri:
+                trip.coverImage ||
+                'https://images.unsplash.com/photo-1506197603052-3cc9c3a201bd?q=80&w=800',
+            }}
+            style={styles.heroImage}
+          />
+          <View style={styles.heroOverlay} />
+
+          {/* Badges on top */}
+          <View style={styles.heroBadgeRow}>
+            <View
+              style={[
+                styles.statusBadge,
+                isTripActive
+                  ? { backgroundColor: C.success }
+                  : trip.status === 'LOCKED'
+                  ? { backgroundColor: '#795548' }
+                  : { backgroundColor: C.warning },
+              ]}
             >
-              <Text style={[styles.saveBtnText, isSaved && styles.saveBtnTextActive]}>
-                {isSaved ? '❤️ Đã lưu' : '🤍 Lưu tuyến'}
+              <View style={styles.statusDot} />
+              <Text style={styles.statusBadgeText}>
+                {isTripActive ? 'ĐANG DIỄN RA' : trip.status === 'LOCKED' ? 'ĐÃ CHỐT ĐOÀN' : 'KẾ HOẠCH'}
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.useBtn} onPress={() => navigation.navigate('CreateTrip')}>
-              <Text style={styles.useBtnText}>🏍️ Dùng tuyến này</Text>
+            </View>
+
+            {trip.tripType && (
+              <View style={styles.tierBadge}>
+                <Text style={styles.tierBadgeText}>HẠNG {trip.tripType.toUpperCase()}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Hero Bottom Info */}
+          <View style={styles.heroBottomInfo}>
+            <Text style={styles.heroTitle}>{trip.name}</Text>
+            <View style={styles.heroMetaRow}>
+              <View style={styles.heroMetaItem}>
+                <Feather name={trip.isPublic ? 'globe' : 'lock'} size={12} color="#FFF" />
+                <Text style={styles.heroMetaText}>{trip.isPublic ? 'Công khai' : 'Riêng tư'}</Text>
+              </View>
+              <Text style={styles.heroMetaDot}>•</Text>
+              <View style={styles.heroMetaItem}>
+                <MaterialCommunityIcons name="motorbike" size={14} color="#FFF" />
+                <Text style={styles.heroMetaText}>{trip.vehicle || 'Xe máy'}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Metric Strip (4 metrics) */}
+        <View style={styles.metricCard}>
+          {/* Quãng đường */}
+          <View style={styles.metricItem}>
+            <MaterialCommunityIcons name="map-marker-distance" size={20} color={C.primary} />
+            <Text style={styles.metricVal}>{trip.distanceKm} km</Text>
+            <Text style={styles.metricLbl}>Quãng đường</Text>
+          </View>
+
+          <View style={styles.metricDivider} />
+
+          {/* Thời gian */}
+          <View style={styles.metricItem}>
+            <Feather name="calendar" size={18} color={C.primary} />
+            <Text style={styles.metricVal}>{formatTripDate(trip.startAt).split(' ')[0]}</Text>
+            <Text style={styles.metricLbl}>Khởi hành</Text>
+          </View>
+
+          <View style={styles.metricDivider} />
+
+          {/* Thành viên */}
+          <View style={styles.metricItem}>
+            <Feather name="users" size={18} color={C.primary} />
+            <Text style={styles.metricVal}>
+              {trip.members?.length || 1}/{trip.maxMembers}
+            </Text>
+            <Text style={styles.metricLbl}>Thành viên</Text>
+          </View>
+
+          <View style={styles.metricDivider} />
+
+          {/* Phương tiện */}
+          <View style={styles.metricItem}>
+            <MaterialCommunityIcons name="motorbike" size={20} color={C.primary} />
+            <Text style={styles.metricVal}>{trip.vehicle || 'Xe máy'}</Text>
+            <Text style={styles.metricLbl}>Phương tiện</Text>
+          </View>
+        </View>
+
+        {/* Mã mời & Mã QR tham gia */}
+        {trip.inviteCode ? (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeaderLeft}>
+                <MaterialCommunityIcons name="qrcode-scan" size={20} color={C.primary} />
+                <Text style={styles.sectionTitle}>MÃ THAM GIA CHUYẾN ĐI</Text>
+              </View>
+              <TouchableOpacity style={styles.miniBtn} onPress={() => setShowQrModal(true)}>
+                <MaterialCommunityIcons name="qrcode" size={14} color={C.primary} />
+                <Text style={styles.miniBtnText}>Mã lớn</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inviteBoxRow}>
+              <View style={styles.inviteCodeWrap}>
+                <Text style={styles.inviteCodeLabel}>MÃ MỜI</Text>
+                <Text style={styles.inviteCodeText}>{trip.inviteCode}</Text>
+                <TouchableOpacity
+                  style={styles.copyPill}
+                  onPress={() => Alert.alert('Đã sao chép!', `Mã mời ${trip.inviteCode} đã được lưu.`)}
+                >
+                  <Feather name="copy" size={13} color={C.primary} />
+                  <Text style={styles.copyPillText}>Sao chép</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.qrThumbWrap} onPress={() => setShowQrModal(true)}>
+                <QRCode value={qrPayload} size={86} color={C.heading} backgroundColor="#FFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Thông tin chuyến đi */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderLeft}>
+            <Feather name="info" size={20} color={C.primary} />
+            <Text style={styles.sectionTitle}>THÔNG TIN HÀNH TRÌNH</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Trưởng đoàn:</Text>
+            <Text style={styles.infoValue}>{leaderMember?.name || 'Trưởng nhóm'}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Vai trò của bạn:</Text>
+            <View style={[styles.rolePill, isLeader && styles.leaderRolePill]}>
+              <Text style={[styles.rolePillText, isLeader && styles.leaderRolePillText]}>
+                {isLeader ? 'Trưởng đoàn' : trip.myRole === 'admin' ? 'Quản trị viên' : 'Thành viên'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Thời gian xuất phát:</Text>
+            <Text style={styles.infoValue}>{formatTripDate(trip.startAt)}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Chế độ hiển thị:</Text>
+            <Text style={styles.infoValue}>
+              {trip.isPublic ? 'Công khai (Bất kỳ ai có mã)' : 'Riêng tư (Chỉ thành viên được duyệt)'}
+            </Text>
+          </View>
+
+          {/* Ghi chú */}
+          <View style={styles.noteBox}>
+            <Text style={styles.noteTitle}>Ghi chú từ Trưởng đoàn</Text>
+            <Text style={styles.noteContent}>
+              {trip.note ? trip.note : 'Chưa có ghi chú đặc biệt cho chuyến đi này.'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Danh sách thành viên */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeaderLeft}>
+              <Feather name="users" size={20} color={C.primary} />
+              <Text style={styles.sectionTitle}>
+                THÀNH VIÊN ({trip.members?.length || 1}/{trip.maxMembers})
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.miniBtn}
+              onPress={() => navigation.navigate('TeamRoster', { tripId: trip.id })}
+            >
+              <Text style={styles.miniBtnText}>Vào phòng chờ</Text>
+              <Feather name="chevron-right" size={14} color={C.primary} />
             </TouchableOpacity>
           </View>
 
-          {renderTabs()}
+          {trip.members && trip.members.length > 0 ? (
+            <View style={styles.memberListWrap}>
+              {trip.members.map((member) => {
+                const isMemberLeader = member.role === 'LEADER' || (member.role as string) === 'leader';
+                const avatarUri =
+                  member.avatar ||
+                  `https://ui-avatars.com/api/?name=${encodeURIComponent(member.name)}&background=CD8554&color=fff`;
 
-          {activeTab === 'Tổng quan' && renderTongQuan()}
-          {activeTab === 'Điểm dừng' && renderDiemDung()}
-          {activeTab === 'Plan' && renderPlan()}
-          {activeTab === 'Review' && renderReview()}
-          {activeTab === 'Thời tiết' && renderWeather()}
-
-          <View style={{ height: 100 }} />
+                return (
+                  <View key={member.userId} style={styles.memberRow}>
+                    <Image source={{ uri: avatarUri }} style={styles.memberAvatar} />
+                    <View style={styles.memberInfo}>
+                      <Text style={styles.memberName} numberOfLines={1}>
+                        {member.name}
+                      </Text>
+                      <Text style={styles.memberRoleText}>
+                        {isMemberLeader ? 'Trưởng đoàn' : member.role === 'SWEEPER' ? 'Chốt đoàn' : 'Thành viên'}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.memberStatusPill,
+                        member.accepted ? styles.memberStatusActive : styles.memberStatusPending,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.memberStatusText,
+                          member.accepted ? styles.memberStatusTextActive : styles.memberStatusTextPending,
+                        ]}
+                      >
+                        {member.accepted ? 'Đã tham gia' : 'Chờ xác nhận'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={styles.emptyMembersWrap}>
+              <Text style={styles.emptyMembersText}>Chưa tải danh sách thành viên.</Text>
+            </View>
+          )}
         </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
-    </View>
+
+      {/* Bottom Sticky Action Bar */}
+      <View style={styles.bottomBar}>
+        {/* Nút hành động chính */}
+        {isTripActive ? (
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => navigation.navigate('LiveTracking', { tripId: trip.id })}
+          >
+            <MaterialCommunityIcons name="navigation-variant" size={20} color="#FFF" style={{ marginRight: 8 }} />
+            <Text style={styles.primaryBtnText}>Vào theo dõi hành trình</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => navigation.navigate('TeamRoster', { tripId: trip.id })}
+          >
+            <Ionicons name="people" size={20} color="#FFF" style={{ marginRight: 8 }} />
+            <Text style={styles.primaryBtnText}>
+              {isLeader ? 'Phòng chờ & Chốt đoàn' : 'Vào phòng chờ'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Nút rời hoặc huỷ chuyến */}
+        <View style={styles.bottomSubRow}>
+          <TouchableOpacity
+            style={styles.dangerTextBtn}
+            onPress={handleLeaveTrip}
+            disabled={isActionLoading}
+          >
+            <Feather name="log-out" size={15} color={C.danger} style={{ marginRight: 4 }} />
+            <Text style={styles.dangerTextBtnLabel}>Rời chuyến đi</Text>
+          </TouchableOpacity>
+
+          {isLeader && (
+            <TouchableOpacity
+              style={styles.dangerTextBtn}
+              onPress={handleDeleteTrip}
+              disabled={isActionLoading}
+            >
+              <Feather name="trash-2" size={15} color={C.danger} style={{ marginRight: 4 }} />
+              <Text style={styles.dangerTextBtnLabel}>Huỷ chuyến đi</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Modal xem mã QR lớn */}
+      <Modal visible={showQrModal} transparent animationType="fade" onRequestClose={() => setShowQrModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowQrModal(false)}>
+              <Ionicons name="close" size={24} color={C.sub} />
+            </TouchableOpacity>
+
+            <Text style={styles.modalTitle}>Mã QR Chuyến Đi</Text>
+            <Text style={styles.modalSub} numberOfLines={2}>
+              {trip.name}
+            </Text>
+
+            <View style={styles.modalQrWrap}>
+              <QRCode value={qrPayload} size={220} color={C.heading} backgroundColor="#FFF" />
+            </View>
+
+            <View style={styles.modalCodePill}>
+              <Text style={styles.modalCodeLabel}>MÃ MỜI:</Text>
+              <Text style={styles.modalCodeValue}>{trip.inviteCode || trip.id}</Text>
+            </View>
+
+            <Text style={styles.modalNote}>Bạn bè mở camera quét mã QR này từ Road2D để tham gia ngay</Text>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  imageContainer: { width: '100%', height: 280 },
-  headerImage: { width: '100%', height: '100%' },
-  backButton: { position: 'absolute', top: Platform.OS === 'android' ? StatusBar.currentHeight! + 10 : 50, left: 20, width: 40, height: 40, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  infoSection: { backgroundColor: colors.background, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -30, padding: 24, minHeight: 500 },
-  breadcrumb: { fontSize: 12, color: colors.primary, fontWeight: 'bold', marginBottom: 4, textTransform: 'uppercase' },
-  title: { fontSize: 28, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 16 },
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 12 },
-  statChip: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
-  tagPill: { backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, fontSize: 12, color: colors.textSecondary },
-  actionsRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  saveBtn: { flex: 1, backgroundColor: '#FFF', borderWidth: 1, borderColor: colors.border, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  saveBtnActive: { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' },
-  saveBtnText: { fontSize: 15, fontWeight: 'bold', color: colors.textPrimary },
-  saveBtnTextActive: { color: '#D32F2F' },
-  useBtn: { flex: 2, backgroundColor: colors.primary, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  useBtnText: { fontSize: 15, fontWeight: 'bold', color: '#FFF' },
-  tabScroll: { borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 20 },
-  tab: { paddingVertical: 12, marginRight: 24, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  activeTab: { borderBottomColor: colors.primary },
-  tabText: { fontSize: 15, color: colors.textSecondary, fontWeight: '600' },
-  activeTabText: { color: colors.primary, fontWeight: 'bold' },
-  tabContent: { paddingBottom: 20 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 8, marginTop: 16 },
-  descText: { fontSize: 14, color: colors.textSecondary, lineHeight: 22 },
-  warningBox: { backgroundColor: '#FFEBEE', padding: 12, borderRadius: 12, marginTop: 12 },
-  warningTitle: { color: '#D32F2F', fontWeight: 'bold', marginBottom: 4 },
-  warningText: { color: '#D32F2F', fontSize: 13 },
-  vehicleTag: { backgroundColor: '#E8F5E9', color: '#2E7D32', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, fontSize: 13, fontWeight: 'bold' },
-  costBox: { backgroundColor: '#F9F6F0', padding: 12, borderRadius: 12 },
-  costItem: { fontSize: 14, color: colors.textSecondary, marginBottom: 6 },
-  timelineContainer: { paddingTop: 10 },
-  timelineItem: { flexDirection: 'row', marginBottom: 20 },
-  timelineLeft: { alignItems: 'center', marginRight: 16, width: 20 },
-  timelineDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#D7CCC8', borderWidth: 3, borderColor: '#FFF' },
-  dotPrimary: { backgroundColor: colors.primary, width: 18, height: 18, borderRadius: 9 },
-  dotWarning: { backgroundColor: '#FF5252' },
-  timelineLine: { width: 2, flex: 1, backgroundColor: colors.border, marginTop: 4, marginBottom: -16 },
-  timelineContent: { flex: 1 },
-  timelineTitle: { fontSize: 15, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 4 },
-  timelineDesc: { fontSize: 13, color: colors.textSecondary },
-  planCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
-  planAuthor: { fontSize: 12, color: colors.textSecondary, marginBottom: 8 },
-  planTitle: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 8 },
-  planPreview: { fontSize: 14, color: colors.textSecondary, lineHeight: 20, marginBottom: 12 },
-  planFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
-  planStats: { fontSize: 12, color: colors.textSecondary },
-  forkBtn: { backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  forkText: { color: '#2E7D32', fontWeight: 'bold', fontSize: 12 },
-  emptyState: { padding: 40, alignItems: 'center' },
-  emptyStateText: { color: colors.textSecondary, fontStyle: 'italic' },
-  reviewOverview: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
-  ratingBig: { fontSize: 36, fontWeight: 'bold', color: colors.primary, marginRight: 16 },
-  stars: { flex: 1 },
-  starText: { fontSize: 18, marginBottom: 4 },
-  reviewCount: { fontSize: 12, color: colors.textSecondary },
-  reviewCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
-  reviewHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  reviewerAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12 },
-  reviewerName: { fontSize: 15, fontWeight: 'bold', color: colors.textPrimary },
-  reviewMeta: { fontSize: 12, color: colors.textSecondary },
-  reviewText: { fontSize: 14, color: colors.textPrimary, lineHeight: 22, marginBottom: 12 },
-  reviewImages: { flexDirection: 'row', gap: 8 },
-  reviewImg: { width: 100, height: 75, borderRadius: 8 },
-  weatherAlert: { backgroundColor: '#FFF3E0', padding: 12, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#FFE0B2' },
-  weatherAlertText: { color: '#E65100', fontSize: 13, fontWeight: 'bold' },
-  weatherRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-  weatherDay: { flex: 1, fontSize: 15, fontWeight: 'bold', color: colors.textPrimary },
-  weatherIcon: { marginRight: 16 },
-  weatherTemp: { width: 60, alignItems: 'center' },
-  tempHigh: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary },
-  tempLow: { fontSize: 13, color: colors.textSecondary },
-  weatherRain: { width: 60, fontSize: 13, color: '#1976D2', textAlign: 'right', fontWeight: '500' },
+  safeArea: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: C.bg,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  headerBtn: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.heading,
+  },
+  container: {
+    padding: 20,
+  },
+  centerBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loadingText: {
+    marginTop: 14,
+    fontSize: 14,
+    color: C.sub,
+    fontWeight: '500',
+  },
+  errorIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FAF0E6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.heading,
+    marginBottom: 8,
+  },
+  errorSub: {
+    fontSize: 14,
+    color: C.sub,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.primary,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  retryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+
+  // Hero Card
+  heroCard: {
+    height: 220,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  heroImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFF',
+    marginRight: 6,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: 0.5,
+  },
+  tierBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  tierBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: 0.5,
+  },
+  heroBottomInfo: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+  },
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFF',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroMetaText: {
+    fontSize: 12,
+    color: '#FFF',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  heroMetaDot: {
+    color: '#FFF',
+    marginHorizontal: 8,
+    fontSize: 12,
+  },
+
+  // Metric Strip
+  metricCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  metricItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  metricVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: C.heading,
+    marginTop: 6,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  metricLbl: {
+    fontSize: 11,
+    color: C.sub,
+    fontWeight: '500',
+  },
+  metricDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: C.borderLight,
+  },
+
+  // Section Cards
+  sectionCard: {
+    backgroundColor: C.card,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 1,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: C.heading,
+    marginLeft: 8,
+    letterSpacing: 0.5,
+  },
+  miniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#FAF5EE',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  miniBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.primary,
+    marginRight: 2,
+  },
+
+  // Invite & QR
+  inviteBoxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  inviteCodeWrap: {
+    flex: 1,
+    marginRight: 16,
+  },
+  inviteCodeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.sub,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  inviteCodeText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: C.primary,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  copyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#FAF5EE',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  copyPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.primary,
+    marginLeft: 4,
+  },
+  qrThumbWrap: {
+    padding: 8,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+
+  // Info Row
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: C.sub,
+    fontWeight: '600',
+  },
+  infoValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  rolePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#FAF5EE',
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  rolePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.sub,
+  },
+  leaderRolePill: {
+    backgroundColor: '#FDF0E6',
+    borderColor: C.primary,
+  },
+  leaderRolePillText: {
+    color: C.primary,
+  },
+
+  // Note Box
+  noteBox: {
+    marginTop: 14,
+    backgroundColor: '#FAF5EE',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  noteTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.heading,
+    marginBottom: 4,
+  },
+  noteContent: {
+    fontSize: 13,
+    color: C.text,
+    lineHeight: 18,
+  },
+
+  // Members list
+  memberListWrap: {
+    marginTop: 4,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  memberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginRight: 12,
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.heading,
+    marginBottom: 2,
+  },
+  memberRoleText: {
+    fontSize: 12,
+    color: C.sub,
+  },
+  memberStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  memberStatusActive: {
+    backgroundColor: '#E8F5E9',
+  },
+  memberStatusPending: {
+    backgroundColor: '#FFF3E0',
+  },
+  memberStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  memberStatusTextActive: {
+    color: C.success,
+  },
+  memberStatusTextPending: {
+    color: C.warning,
+  },
+  emptyMembersWrap: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  emptyMembersText: {
+    fontSize: 13,
+    color: C.sub,
+  },
+
+  // Bottom Sticky Bar
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 14,
+    borderTopWidth: 1,
+    borderTopColor: C.borderLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.primary,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 8,
+  },
+  primaryBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  bottomSubRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dangerTextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  dangerTextBtnLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.danger,
+  },
+
+  // Modal QR
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContainer: {
+    width: '100%',
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  modalCloseBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FAF5EE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.heading,
+    marginBottom: 4,
+  },
+  modalSub: {
+    fontSize: 13,
+    color: C.sub,
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  modalQrWrap: {
+    padding: 16,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  modalCodePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EE',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: 12,
+  },
+  modalCodeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.sub,
+    marginRight: 6,
+  },
+  modalCodeValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: C.primary,
+    letterSpacing: 1,
+  },
+  modalNote: {
+    fontSize: 12,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
 });
 
 export default TripDetailsScreen;

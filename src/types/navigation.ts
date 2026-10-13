@@ -38,6 +38,7 @@ export type RootStackParamList = {
   CreateRoute: undefined;
   AllUpcomingTrips: undefined;
   Conversation: { chatId: string; chatName: string };
+  ScanQR: undefined;
 };
 
 // ─────────────────────────────────────────────
@@ -64,6 +65,7 @@ export type LiveTrackingScreenNavigationProp = NativeStackNavigationProp<RootSta
 export type CreateRouteScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateRoute'>;
 export type AllUpcomingTripsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AllUpcomingTrips'>;
 export type ConversationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
+export type ScanQRScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ScanQR'>;
 
 // Tab screens — có thể navigate cả trong Tab lẫn trong Stack nên dùng CompositeNavigationProp
 export type HomeScreenNavigationProp = CompositeNavigationProp<

@@ -16,20 +16,25 @@ const genInviteCode = () =>
   'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
 
 function mapBackendTripToFrontend(b: any): Trip {
+  const rawDist = Number(b.totalDistance) || 0;
+  const distanceKm = rawDist > 500 ? Math.round(rawDist / 1000) : Math.round(rawDist);
   return {
     id: b.id,
     name: b.name,
     routeId: b.id,
     routeName: b.name,
-    distanceKm: Math.round((b.totalDistance || 0) / 1000) || b.totalDistance || 0,
+    distanceKm: distanceKm,
     status: (b.status?.toUpperCase() || 'PLANNING') as any,
+    tripType: b.tripType || 'bronze',
     startAt: b.startTime || b.createdTime || new Date().toISOString(),
+    endTime: b.endTime,
     vehicle: 'Xe máy',
     maxMembers: b.memberLimit || 15,
     isPublic: !!b.visibility,
     note: b.note || '',
-    inviteCode: '',
+    inviteCode: b.inviteToken || '',
     leaderId: b.ownerId,
+    myRole: b.myRole,
     members: [],
   };
 }
@@ -70,8 +75,8 @@ const tripService = {
       if (Array.isArray(membersList)) {
         trip.members = membersList.map((m: any) => ({
           userId: m.userId,
-          name: m.nickname ?? m.username ?? m.name ?? m.userId,
-          avatar: m.avatar ?? '',
+          name: m.nickname || m.username || m.name || m.userId,
+          avatar: m.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.nickname || m.username || 'User')}&background=CD8554&color=fff`,
           role: (m.role?.toUpperCase() || 'RIDER') as any,
           nickname: m.nickname,
           status: m.status,
@@ -80,6 +85,15 @@ const tripService = {
       }
     } catch {
       // Bỏ qua nếu không lấy được members
+    }
+    // Lấy invite code nếu có quyền (leader/admin)
+    try {
+      const linkRes = await apiClient.post<any>(`/trips/${id}/invite-link`);
+      if (linkRes.data?.token) {
+        trip.inviteCode = linkRes.data.token;
+      }
+    } catch {
+      // Không có quyền lấy invite code hoặc lỗi
     }
     return trip;
   },
@@ -166,8 +180,32 @@ const tripService = {
       return trip;
     }
     const token = inviteCode.includes('/') ? inviteCode.split('/').pop()! : inviteCode.trim();
-    const res = await apiClient.post<any>(`/trips/join/${token}`);
-    return mapBackendTripToFrontend(res.data);
+    try {
+      const res = await apiClient.post<any>(`/trips/join/${token}`);
+      const tripId = res.data?.tripId || res.data?.id;
+      if (tripId) {
+        try {
+          const fullTrip = await tripService.getTripById(tripId);
+          if (fullTrip) return fullTrip;
+        } catch {
+          // Fallback nếu không get được chi tiết
+        }
+      }
+      return mapBackendTripToFrontend(res.data);
+    } catch (err: any) {
+      const errorMsg = String(err?.response?.data?.message || err?.response?.data?.error || '');
+      if (err?.response?.status === 409 || errorMsg.includes('already a trip member')) {
+        // Cố gắng tìm trip trong danh sách trips đã tham gia của user
+        try {
+          const myTrips = await tripService.getTrips();
+          const matched = myTrips.find((t) => t.inviteCode === token || t.id === token);
+          if (matched) {
+            (err as any).existingTrip = matched;
+          }
+        } catch {}
+      }
+      throw err;
+    }
   },
 
   /** POST /trips/:id/leave */
@@ -178,6 +216,16 @@ const tripService = {
       return;
     }
     await apiClient.post(`/trips/${id}/leave`);
+  },
+
+  /** DELETE /trips/:id */
+  deleteTrip: async (id: string): Promise<void> => {
+    if (USE_MOCK) {
+      await delay(400);
+      mockDb.trips = mockDb.trips.filter((t) => t.id !== id);
+      return;
+    }
+    await apiClient.delete(`/trips/${id}`);
   },
 };
 

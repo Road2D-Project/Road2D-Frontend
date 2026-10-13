@@ -10,8 +10,9 @@ import LiveTrackingScreen from '../screens/map/LiveTrackingScreen';
 import CreateRouteScreen from '../screens/trip/CreateRouteScreen';
 import AllUpcomingTripsScreen from '../screens/home/AllUpcomingTripsScreen';
 import ConversationScreen from '../screens/chat/ConversationScreen';
+import ScanQRScreen from '../screens/trip/ScanQRScreen';
 import TabNavigator from './TabNavigator';
-import LoadingScreen from '../components/common/LoadingScreen';
+import { LoadingScreen } from '../components/common/LoadingScreen';
 import type { RootStackParamList } from '../types/navigation';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -71,6 +72,9 @@ const AppNavigator = () => {
 
             {/* Chat */}
             <Stack.Screen name="Conversation" component={ConversationScreen} />
+
+            {/* QR Scanner */}
+            <Stack.Screen name="ScanQR" component={ScanQRScreen} />
           </>
         )}
       </Stack.Navigator>

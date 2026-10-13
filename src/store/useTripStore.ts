@@ -16,7 +16,10 @@ export interface TripState {
   draft: Partial<CreateTripPayload>;
 
   fetchTrips: () => Promise<void>;
+  getTripById: (id: string) => Promise<Trip | undefined>;
   createTrip: (payload: CreateTripPayload) => Promise<Trip>;
+  leaveTrip: (id: string) => Promise<void>;
+  deleteTrip: (id: string) => Promise<void>;
   setCurrentTrip: (id: string | null) => void;
   updateDraft: (patch: Partial<CreateTripPayload>) => void;
   clearDraft: () => void;
@@ -41,10 +44,42 @@ export const useTripStore = create<TripState>()((set, get) => ({
     }
   },
 
+  getTripById: async (id: string) => {
+    try {
+      const trip = await tripService.getTripById(id);
+      if (trip) {
+        set((s) => ({
+          trips: s.trips.some((t) => t.id === id)
+            ? s.trips.map((t) => (t.id === id ? trip : t))
+            : [trip, ...s.trips],
+        }));
+      }
+      return trip;
+    } catch {
+      return undefined;
+    }
+  },
+
   createTrip: async (payload) => {
     const trip = await tripService.createTrip(payload);
     set((s) => ({ trips: [trip, ...s.trips], currentTripId: trip.id, draft: {} }));
     return trip;
+  },
+
+  leaveTrip: async (id: string) => {
+    await tripService.leaveTrip(id);
+    set((s) => ({
+      trips: s.trips.filter((t) => t.id !== id),
+      currentTripId: s.currentTripId === id ? null : s.currentTripId,
+    }));
+  },
+
+  deleteTrip: async (id: string) => {
+    await tripService.deleteTrip(id);
+    set((s) => ({
+      trips: s.trips.filter((t) => t.id !== id),
+      currentTripId: s.currentTripId === id ? null : s.currentTripId,
+    }));
   },
 
   setCurrentTrip: (id) => set({ currentTripId: id }),
@@ -57,6 +92,12 @@ export const useTripStore = create<TripState>()((set, get) => ({
 
 /** Selector tiện dụng. */
 export const selectUpcomingTrips = (s: TripState) =>
-  s.trips.filter((t) => t.status === 'PLANNING');
+  s.trips.filter((t) => t.status === 'PLANNING' || (t.status as string) === 'planning');
 export const selectActiveTrip = (s: TripState) =>
-  s.trips.find((t) => t.status === 'ACTIVE');
+  s.trips.find(
+    (t) =>
+      t.status === 'ACTIVE' ||
+      (t.status as string) === 'active' ||
+      t.status === 'LOCKED' ||
+      (t.status as string) === 'locked'
+  );

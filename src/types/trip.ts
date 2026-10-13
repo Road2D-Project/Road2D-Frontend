@@ -13,8 +13,12 @@ export type TripStatus =
   | 'ACTIVE'
   | 'COMPLETED'
   | 'CANCELLED'
+  | 'LOCKED'
   | 'planning'
-  | 'locked';
+  | 'active'
+  | 'locked'
+  | 'completed'
+  | 'cancelled';
 
 /** Vai trò hệ thống / phân quyền quản trị của thành viên (utils/enum/TripRole.go) */
 export type BackendTripRole = 'leader' | 'member' | 'admin';
