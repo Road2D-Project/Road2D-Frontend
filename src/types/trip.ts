@@ -83,6 +83,7 @@ export interface Trip {
   endTime?: string;
   vehicle: VehicleType;
   maxMembers: number;
+  currentMembers?: number;
   isPublic: boolean;
   note?: string;
   inviteCode: string;

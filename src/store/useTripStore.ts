@@ -26,6 +26,7 @@ export interface TripState {
   updateDraft: (patch: Partial<CreateTripPayload>) => void;
   clearDraft: () => void;
   updateTripStatus: (id: string, status: Trip['status']) => void;
+  removeTripMember: (tripId: string, userId: string) => void;
   reset: () => void;
 }
 
@@ -90,6 +91,18 @@ export const useTripStore = create<TripState>()((set, get) => ({
   clearDraft: () => set({ draft: {} }),
   updateTripStatus: (id, status) =>
     set({ trips: get().trips.map((t) => (t.id === id ? { ...t, status } : t)) }),
+  removeTripMember: (tripId, userId) =>
+    set({
+      trips: get().trips.map((t) => {
+        if (t.id !== tripId) return t;
+        const newMembers = (t.members || []).filter((m) => m.userId !== userId);
+        return {
+          ...t,
+          members: newMembers,
+          currentMembers: newMembers.length,
+        };
+      }),
+    }),
   reset: () => set({ trips: [], currentTripId: null, draft: {}, error: null, loading: false, hasFetched: false }),
 }));
 

@@ -189,7 +189,7 @@ const AllUpcomingTripsScreen = () => {
                   <View style={styles.bottomMetaRow}>
                     <Feather name="users" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
                     <Text style={styles.bottomMetaText}>
-                      {Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers} thành viên
+                      {trip.members?.length ?? trip.currentMembers ?? 1}/{trip.maxMembers} thành viên
                     </Text>
                     <Text style={styles.bottomMetaDivider}>•</Text>
                     <MaterialCommunityIcons name="motorbike" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />

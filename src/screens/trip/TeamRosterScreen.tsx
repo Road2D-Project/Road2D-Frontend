@@ -149,26 +149,25 @@ const TeamRosterScreen = () => {
   // Xác nhận Kick thành viên khỏi đoàn
   const handleConfirmKick = () => {
     if (!selectedMember || !tripId) return;
+    const memberToKick = selectedMember;
     setShowActionModal(false);
 
     setConfirmModal({
       visible: true,
       type: 'kick',
       title: 'Xoá thành viên khỏi đoàn?',
-      message: `Bạn có chắc chắn muốn kick "${selectedMember.name}" khỏi chuyến đi này không? Thành viên này sẽ không thể theo dõi hành trình cùng đoàn.`,
+      message: `Bạn có chắc chắn muốn kick "${memberToKick.name || 'thành viên này'}" khỏi chuyến đi này không? Thành viên này sẽ không thể theo dõi hành trình cùng đoàn.`,
       confirmText: 'Xoá thành viên',
       onConfirm: async () => {
         setIsActionLoading(true);
         try {
-          await tripService.kickMember(tripId, selectedMember.userId);
-          setMembers((prev) => prev.filter((m) => m.userId !== selectedMember.userId));
-          setConfirmModal({
-            visible: true,
-            type: 'success',
-            title: 'Đã xoá thành viên',
-            message: `Đã loại bỏ ${selectedMember.name} khỏi chuyến đi.`,
-            confirmText: 'Đóng',
-          });
+          await tripService.kickMember(tripId, memberToKick.userId);
+          // 1. Cập nhật ngay lập tức danh sách và số lượng ở màn hình hiện tại
+          setMembers((prev) => prev.filter((m) => m.userId !== memberToKick.userId));
+          // 2. Cập nhật store để các màn hình khác (TripDetailsScreen, HomeScreen) đồng bộ ngay
+          useTripStore.getState().removeTripMember(tripId, memberToKick.userId);
+          // 3. Đóng modal ngay khi xong để người dùng nhìn thấy danh sách và số lượng mới ngay
+          setConfirmModal((prev) => ({ ...prev, visible: false }));
         } catch (err: any) {
           setConfirmModal({
             visible: true,

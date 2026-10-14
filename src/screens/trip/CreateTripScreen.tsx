@@ -33,6 +33,7 @@ import type { RootStackParamList, CreateTripScreenNavigationProp } from '../../t
 import { useTripStore } from '../../store/useTripStore';
 import QRCode from 'react-native-qrcode-svg';
 import friendService, { FriendItem } from '../../services/api/friendService';
+import planningService, { RoutePreviewSummary } from '../../services/api/planningService';
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -180,6 +181,53 @@ const CreateTripScreen = () => {
   const [showQrModal, setShowQrModal] = useState(false);
   const currentTripId = useTripStore((s: any) => s.currentTripId);
   const createTrip = useTripStore((s: any) => s.createTrip);
+
+  // Preview route via planning API (v1/planning/review / preview)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewSummary, setPreviewSummary] = useState<RoutePreviewSummary | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+
+  const handlePreviewTripRoute = async (customRoute: any) => {
+    const origin = customRoute.origin || customRoute.waypoints?.[0];
+    const destination = customRoute.destination || customRoute.waypoints?.[customRoute.waypoints?.length - 1];
+    const waypoints = [
+      ...(origin ? [origin] : []),
+      ...(customRoute.stops || []),
+      ...(destination ? [destination] : []),
+    ];
+
+    if (waypoints.length < 2) {
+      Alert.alert('Chưa đủ điểm', 'Lộ trình cần ít nhất 2 điểm để xem trước đường đi.');
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    try {
+      const summary = await planningService.previewRouteFromWaypoints(waypoints);
+      setPreviewSummary(summary);
+      setShowPreviewModal(true);
+    } catch {
+      // Fallback hiển thị dữ liệu sẵn có từ customRoute
+      setPreviewSummary({
+        locations: waypoints.map((w, idx) => ({
+          locationId: String(idx),
+          name: w.name,
+          lat: w.lat,
+          lng: w.lng,
+        })),
+        legs: customRoute.legs || [],
+        totalDistanceM: customRoute.distanceM || 0,
+        totalDurationS: customRoute.totalDurationS || customRoute.travelDurationS || 0,
+        distanceFormatted: customRoute.distance || '0 km',
+        durationFormatted: customRoute.duration || '0 phút',
+        polylineCoords: customRoute.polylineCoords || [],
+        raw: {} as any,
+      });
+      setShowPreviewModal(true);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
 
   const loadFriends = async () => {
     setLoadingFriends(true);
@@ -382,6 +430,23 @@ const CreateTripScreen = () => {
               </View>
             </View>
           </View>
+
+          {/* Nút Xem trước đường đi (gọi API v1/planning/review) */}
+          <TouchableOpacity
+            style={styles.previewTripRouteBtn}
+            onPress={() => handlePreviewTripRoute(cr)}
+            disabled={isPreviewLoading}
+            activeOpacity={0.8}
+          >
+            {isPreviewLoading ? (
+              <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />
+            ) : (
+              <Ionicons name="map-outline" size={17} color="#FFF" style={{ marginRight: 8 }} />
+            )}
+            <Text style={styles.previewTripRouteBtnText}>
+              {isPreviewLoading ? 'Đang tính đường đi...' : 'Xem trước đường đi'}
+            </Text>
+          </TouchableOpacity>
 
           {/* Action buttons */}
           <View style={styles.routeActionRow}>
@@ -1168,6 +1233,89 @@ const CreateTripScreen = () => {
                 activeOpacity={0.85}
               >
                 <Text style={styles.customAlertBtnText}>Đã hiểu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal Xem trước đường đi (gọi API v1/planning/review) */}
+        <Modal
+          visible={showPreviewModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowPreviewModal(false)}
+        >
+          <View style={styles.previewModalOverlay}>
+            <View style={styles.previewModalCard}>
+              <View style={styles.previewModalHeader}>
+                <View style={styles.previewModalHeaderLeft}>
+                  <View style={styles.previewModalIconCircle}>
+                    <Ionicons name="map" size={20} color={C.primary} />
+                  </View>
+                  <View>
+                    <Text style={styles.previewModalTitle}>Xem trước đường đi</Text>
+                    <Text style={styles.previewModalSub}>
+                      Dữ liệu lộ trình tối ưu từ Road2D Backend
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.previewModalCloseBtn}
+                  onPress={() => setShowPreviewModal(false)}
+                >
+                  <Ionicons name="close" size={20} color={C.heading} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.previewMetricsRow}>
+                <View style={styles.previewMetricItem}>
+                  <Ionicons name="navigate-circle-outline" size={20} color={C.primary} />
+                  <Text style={styles.previewMetricVal}>
+                    {previewSummary?.distanceFormatted || '0 km'}
+                  </Text>
+                  <Text style={styles.previewMetricLbl}>Quãng đường</Text>
+                </View>
+                <View style={styles.previewMetricDivider} />
+                <View style={styles.previewMetricItem}>
+                  <Ionicons name="time-outline" size={20} color={C.primary} />
+                  <Text style={styles.previewMetricVal}>
+                    {previewSummary?.durationFormatted || '0 phút'}
+                  </Text>
+                  <Text style={styles.previewMetricLbl}>Thời gian xe máy</Text>
+                </View>
+              </View>
+
+              <View style={styles.previewWaypointsList}>
+                <View style={styles.previewWpRow}>
+                  <View style={[styles.previewWpDot, { backgroundColor: C.success }]} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.previewWpRole}>ĐIỂM XUẤT PHÁT</Text>
+                    <Text style={styles.previewWpName} numberOfLines={1}>
+                      {previewSummary?.locations?.[0]?.name || selectedRoute?.origin?.name || 'Điểm xuất phát'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.previewWpLine} />
+
+                <View style={styles.previewWpRow}>
+                  <View style={[styles.previewWpDot, { backgroundColor: '#FF5252' }]} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.previewWpRole, { color: '#FF5252' }]}>ĐIỂM ĐẾN</Text>
+                    <Text style={styles.previewWpName} numberOfLines={1}>
+                      {previewSummary?.locations?.[previewSummary.locations.length - 1]?.name ||
+                        selectedRoute?.destination?.name ||
+                        'Điểm đến'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.previewClosePrimaryBtn}
+                onPress={() => setShowPreviewModal(false)}
+              >
+                <Text style={styles.previewClosePrimaryBtnText}>Đóng</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2148,6 +2296,172 @@ const CreateTripScreen = () => {
       color: '#FFF',
       fontSize: 15.5,
       fontWeight: '700',
+    },
+    // Nút Xem trước đường đi trong Step 1
+    previewTripRouteBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.primary,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      marginBottom: 12,
+      shadowColor: C.primary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    previewTripRouteBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    // Preview Modal styles in CreateTripScreen
+    previewModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    previewModalCard: {
+      width: '100%',
+      maxWidth: 380,
+      backgroundColor: C.bg,
+      borderRadius: 20,
+      padding: 20,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.2,
+      shadowRadius: 16,
+      elevation: 8,
+    },
+    previewModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 16,
+    },
+    previewModalHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+      marginRight: 8,
+    },
+    previewModalIconCircle: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: '#F5ECE3',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previewModalTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: C.heading,
+    },
+    previewModalSub: {
+      fontSize: 12,
+      color: C.sub,
+      marginTop: 1,
+    },
+    previewModalCloseBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: '#EAE1D7',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previewMetricsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: C.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingVertical: 12,
+      paddingHorizontal: 8,
+      marginBottom: 16,
+    },
+    previewMetricItem: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    previewMetricVal: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: C.heading,
+      marginTop: 4,
+    },
+    previewMetricLbl: {
+      fontSize: 11,
+      color: C.sub,
+      marginTop: 2,
+    },
+    previewMetricDivider: {
+      width: 1,
+      height: 32,
+      backgroundColor: C.border,
+    },
+    previewWaypointsList: {
+      backgroundColor: C.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 14,
+      marginBottom: 18,
+    },
+    previewWpRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    previewWpDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      flexShrink: 0,
+    },
+    previewWpLine: {
+      width: 2,
+      height: 18,
+      backgroundColor: '#E5DCD3',
+      marginLeft: 4,
+      marginVertical: 4,
+    },
+    previewWpRole: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: C.success,
+      letterSpacing: 0.5,
+      marginBottom: 2,
+    },
+    previewWpName: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: C.heading,
+    },
+    previewClosePrimaryBtn: {
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: C.primary,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.25,
+      shadowRadius: 5,
+      elevation: 3,
+    },
+    previewClosePrimaryBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: '#FFF',
     },
   });
 

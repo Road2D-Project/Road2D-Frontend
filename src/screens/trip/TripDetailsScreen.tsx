@@ -429,7 +429,7 @@ const TripDetailsScreen = () => {
           {/* Thời gian */}
           <View style={styles.metricItem}>
             <Feather name="calendar" size={18} color={C.primary} />
-            <Text style={styles.metricVal}>
+            <Text style={styles.metricVal} numberOfLines={1} adjustsFontSizeToFit>
               {formatTripDate(trip.startAt).includes(',')
                 ? formatTripDate(trip.startAt).split(',')[1]?.trim()
                 : formatTripDate(trip.startAt)}
@@ -439,11 +439,11 @@ const TripDetailsScreen = () => {
 
           <View style={styles.metricDivider} />
 
-          {/* Thành viên (luôn tính tối thiểu 2: Trưởng đoàn + Bạn) */}
+          {/* Thành viên */}
           <View style={styles.metricItem}>
             <Feather name="users" size={18} color={C.primary} />
             <Text style={styles.metricVal}>
-              {Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers}
+              {trip.members?.length ?? trip.currentMembers ?? 1}/{trip.maxMembers}
             </Text>
             <Text style={styles.metricLbl}>Thành viên</Text>
           </View>
@@ -574,7 +574,7 @@ const TripDetailsScreen = () => {
             <View style={styles.sectionHeaderLeft}>
               <Feather name="users" size={18} color={C.primary} />
               <Text style={styles.sectionTitle}>
-                THÀNH VIÊN ({Math.max(trip.members?.length || 2, 2)}/{trip.maxMembers})
+                THÀNH VIÊN ({trip.members?.length ?? trip.currentMembers ?? 1}/{trip.maxMembers})
               </Text>
             </View>
             <TouchableOpacity
@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   metricVal: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: C.heading,
     marginTop: 6,
