@@ -4,9 +4,9 @@
  * USE_MOCK = true  → mọi service trả MOCK DATA (backend chưa xong).
  * USE_MOCK = false → service gọi API thật qua axios.
  *
- * Mặc định BẬT mock. Khi backend sẵn sàng: đặt EXPO_PUBLIC_USE_MOCK=false trong .env.local.
+ * Chỉ bật mock khi EXPO_PUBLIC_USE_MOCK=true. Các giá trị khác (kể cả false) đều gọi API thật.
  */
-export const USE_MOCK: boolean = process.env.EXPO_PUBLIC_USE_MOCK === 'true' ? true : false;
+export const USE_MOCK: boolean = process.env.EXPO_PUBLIC_USE_MOCK === 'true';
 
 export const API_BASE_URL: string =
   process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.162:8080/v1';
