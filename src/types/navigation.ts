@@ -37,6 +37,7 @@ export type RootStackParamList = {
   LiveTracking: { tripId: string };
   CreateRoute: undefined;
   AllUpcomingTrips: undefined;
+  TripHistory: undefined;
   Conversation: { chatId: string; chatName: string };
   ScanQR: undefined;
 };
@@ -64,6 +65,7 @@ export type TeamRosterScreenNavigationProp = NativeStackNavigationProp<RootStack
 export type LiveTrackingScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'LiveTracking'>;
 export type CreateRouteScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateRoute'>;
 export type AllUpcomingTripsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AllUpcomingTrips'>;
+export type TripHistoryScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'TripHistory'>;
 export type ConversationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 export type ScanQRScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ScanQR'>;
 

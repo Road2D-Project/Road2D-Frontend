@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Animated,
   Easing,
   Image,
   Platform,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -18,6 +17,7 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
@@ -68,6 +68,8 @@ const HomeScreen = () => {
 
   // Trips from Backend Store
   const trips = useTripStore((s) => s.trips);
+  const activeTripId = useTripStore((s) => s.activeTripId);
+  const completedTripIds = useTripStore((s) => s.completedTripIds);
   const fetchTrips = useTripStore((s) => s.fetchTrips);
   const tripsLoading = useTripStore((s) => s.loading);
   const hasFetched = useTripStore((s) => s.hasFetched);
@@ -97,11 +99,6 @@ const HomeScreen = () => {
     title: '',
     message: '',
   });
-
-  // Gọi fetchTrips ngay khi component vừa mount để tránh giật lag
-  useEffect(() => {
-    fetchTrips();
-  }, [fetchTrips]);
 
   // Auto fetch when screen gains focus
   useFocusEffect(
@@ -224,18 +221,39 @@ const HomeScreen = () => {
     extrapolate: 'clamp',
   });
 
-  // Filter Active and Upcoming Trips from real backend data
-  const activeTrip = trips.find(
-    (t) =>
-      t.status === 'ACTIVE' ||
-      (t.status as string) === 'active' ||
-      t.status === 'LOCKED' ||
-      (t.status as string) === 'locked'
-  );
+  // Filter Active, Upcoming, and Past Trips from real backend data + Local Storage (dùng useMemo tránh tạo array mới gây re-render vô tận)
+  const activeTrip = useMemo(() => {
+    return trips.find(
+      (t) =>
+        (t.id === activeTripId || t.status === 'ACTIVE' || (t.status as string) === 'active') &&
+        !completedTripIds.includes(t.id) &&
+        t.status !== 'COMPLETED'
+    );
+  }, [trips, activeTripId, completedTripIds]);
 
-  const upcomingTrips = trips.filter(
-    (t) => t.status === 'PLANNING' || (t.status as string) === 'planning'
-  );
+  const upcomingTrips = useMemo(() => {
+    return trips.filter(
+      (t) =>
+        t.status !== 'COMPLETED' &&
+        !completedTripIds.includes(t.id) &&
+        t.id !== activeTripId &&
+        t.status !== 'ACTIVE'
+    );
+  }, [trips, activeTripId, completedTripIds]);
+
+  const pastTrips = useMemo(() => {
+    return trips.filter(
+      (t) => t.status === 'COMPLETED' || completedTripIds.includes(t.id)
+    );
+  }, [trips, completedTripIds]);
+
+  const [searchUpcoming, setSearchUpcoming] = useState('');
+
+  const filteredUpcomingTrips = useMemo(() => {
+    if (!searchUpcoming.trim()) return upcomingTrips;
+    const q = searchUpcoming.trim().toLowerCase();
+    return upcomingTrips.filter((t) => t.name?.toLowerCase().includes(q));
+  }, [upcomingTrips, searchUpcoming]);
 
   // Khi mới vào app hoặc chưa lấy xong dữ liệu chuyến đi từ backend, xoay vòng ngay lập tức cho đến khi lấy được dữ liệu xong
   if (!hasFetched || (tripsLoading && trips.length === 0)) {
@@ -316,7 +334,7 @@ const HomeScreen = () => {
                 ]}
               />
               <Text style={[styles.statusText, !activeTrip && { color: '#FFE0B2' }]}>
-                {activeTrip ? 'ĐANG THAM GIA' : 'HÀNH TRÌNH TIẾP THEO'}
+                {activeTrip ? 'ĐANG DIỄN RA' : 'HÀNH TRÌNH TIẾP THEO'}
               </Text>
             </View>
 
@@ -354,7 +372,7 @@ const HomeScreen = () => {
 
             <View style={styles.continueBtn}>
               <Text style={styles.continueBtnText}>
-                {activeTrip ? 'Tiếp tục hành trình ' : 'Xem chi tiết chuyến đi '}
+                {activeTrip ? 'Vào chuyến đi ' : 'Xem chi tiết chuyến đi '}
               </Text>
               <Feather name="arrow-right" size={18} color="#FFF" />
             </View>
@@ -379,11 +397,37 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {/* Upcoming Trips Section */}
-        <View style={styles.sectionHeader}>
+        {/* Thanh tìm kiếm cho chuyến đi sắp tới */}
+        <View style={styles.homeSearchContainer}>
+          <Feather name="search" size={17} color={C.primary} />
+          <TextInput
+            style={styles.homeSearchInput}
+            placeholder="Tìm kiếm chuyến đi sắp tới..."
+            placeholderTextColor="#A0938C"
+            value={searchUpcoming}
+            onChangeText={setSearchUpcoming}
+            clearButtonMode="while-editing"
+          />
+          {searchUpcoming.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchUpcoming('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close-circle" size={18} color="#A0938C" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* ── CHUYẾN ĐI SẮP TỚI ── */}
+        <View style={[styles.sectionHeader, { marginTop: 4 }]}>
           <Text style={styles.sectionTitle}>CHUYẾN ĐI SẮP TỚI</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('AllUpcomingTrips')}>
-            <Text style={styles.seeAll}>Xem tất cả ({upcomingTrips.length})</Text>
+          <TouchableOpacity
+            style={[styles.historyBtn, { paddingTop: 5 }]}
+            onPress={() => navigation.navigate('TripHistory')}
+            activeOpacity={0.7}
+          >
+            <Feather name="clock" size={13} color={C.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.seeAll}>Lịch sử ({pastTrips.length})</Text>
           </TouchableOpacity>
         </View>
 
@@ -392,16 +436,24 @@ const HomeScreen = () => {
             <ActivityIndicator size="small" color={C.primary} />
             <Text style={styles.loadingText}>Đang tải danh sách chuyến đi...</Text>
           </View>
-        ) : upcomingTrips.length === 0 ? (
+        ) : filteredUpcomingTrips.length === 0 ? (
           <View style={styles.emptyUpcomingBox}>
-            <Ionicons name="calendar-outline" size={36} color={C.primary} />
-            <Text style={styles.emptyUpcomingTitle}>Chưa có chuyến đi sắp tới</Text>
+            <Ionicons
+              name={searchUpcoming.trim() ? 'search-outline' : 'calendar-outline'}
+              size={36}
+              color={C.primary}
+            />
+            <Text style={styles.emptyUpcomingTitle}>
+              {searchUpcoming.trim() ? 'Không tìm thấy chuyến đi' : 'Chưa có chuyến đi sắp tới'}
+            </Text>
             <Text style={styles.emptyUpcomingSub}>
-              Bấm nút (+) bên dưới để tạo chuyến đi mới hoặc quét mã QR để tham gia cùng nhóm.
+              {searchUpcoming.trim()
+                ? `Không có chuyến đi sắp tới nào khớp với từ khóa "${searchUpcoming}".`
+                : 'Bấm nút (+) bên dưới để tạo chuyến đi mới hoặc quét mã QR để tham gia cùng nhóm.'}
             </Text>
           </View>
         ) : (
-          upcomingTrips.map((trip) => (
+          filteredUpcomingTrips.map((trip) => (
             <TouchableOpacity
               key={trip.id}
               style={styles.upcomingCard}
@@ -605,16 +657,16 @@ const HomeScreen = () => {
                   homeAlertModal.type === 'error'
                     ? 'alert-circle'
                     : homeAlertModal.type === 'success'
-                    ? 'checkmark-circle'
-                    : 'information-circle'
+                      ? 'checkmark-circle'
+                      : 'information-circle'
                 }
                 size={46}
                 color={
                   homeAlertModal.type === 'error'
                     ? '#D32F2F'
                     : homeAlertModal.type === 'success'
-                    ? C.success
-                    : C.primary
+                      ? C.success
+                      : C.primary
                 }
               />
             </View>
@@ -664,7 +716,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: C.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    paddingTop: 0,
   },
   container: {
     paddingHorizontal: 24,
@@ -859,10 +911,43 @@ const styles = StyleSheet.create({
     color: C.heading,
   },
   seeAll: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
     color: C.primaryDark,
-    marginBottom: 2,
+  },
+  historyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  homeSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 14,
+    height: 46,
+    marginTop: 14,
+    marginBottom: 6,
+    shadowColor: '#3E2723',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  homeSearchInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 14,
+    color: C.heading,
+    marginLeft: 8,
   },
   loadingBox: {
     paddingVertical: 32,
@@ -894,6 +979,52 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 16,
     paddingHorizontal: 12,
+  },
+  emptyPastBox: {
+    backgroundColor: C.card,
+    borderRadius: 14,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    marginBottom: 16,
+  },
+  emptyPastIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FAF5EE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  emptyPastTitle: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: C.heading,
+    marginBottom: 4,
+  },
+  emptyPastSub: {
+    fontSize: 12,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 16,
+    paddingHorizontal: 8,
+  },
+  completedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#5D3A29',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  completedTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: 0.5,
   },
   upcomingCard: {
     borderRadius: 14,

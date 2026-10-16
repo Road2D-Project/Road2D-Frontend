@@ -5,7 +5,7 @@
 import type { LatLng, PreviewLocationsResponse } from './route';
 
 /** Enum trạng thái chuyến đi ở Backend (utils/enum/TripStatus.go) */
-export type BackendTripStatus = 'planning' | 'locked';
+export type BackendTripStatus = 'planning' | 'locked' | 'active' | 'completed' | 'stay';
 
 /** Trạng thái chuyến đi ở Frontend */
 export type TripStatus =
@@ -14,10 +14,12 @@ export type TripStatus =
   | 'COMPLETED'
   | 'CANCELLED'
   | 'LOCKED'
+  | 'STAY'
   | 'planning'
   | 'active'
   | 'locked'
   | 'completed'
+  | 'stay'
   | 'cancelled';
 
 /** Vai trò hệ thống / phân quyền quản trị của thành viên (utils/enum/TripRole.go) */
@@ -81,6 +83,7 @@ export interface Trip {
   /** ISO string */
   startAt: string;
   endTime?: string;
+  durationDays?: number;
   vehicle: VehicleType;
   maxMembers: number;
   currentMembers?: number;
@@ -93,6 +96,8 @@ export interface Trip {
   myRole?: BackendTripRole;
   createdAt?: string;
   updatedAt?: string;
+  waypoints?: Array<{ lat: number; lng: number; name?: string; id?: string }>;
+  route?: any;
 }
 
 /** Khớp với DTO Backend TripResponse (module/trip/model/response/TripResponse.go) */
@@ -142,7 +147,7 @@ export interface BackendCreateTripRequest {
 /** Dữ liệu form tạo trip (chưa có id/inviteCode — do service sinh ra). */
 export type CreateTripPayload = Pick<
   Trip,
-  'name' | 'routeId' | 'routeName' | 'distanceKm' | 'startAt' | 'vehicle' | 'maxMembers' | 'isPublic' | 'note' | 'coverImage'
+  'name' | 'routeId' | 'routeName' | 'distanceKm' | 'startAt' | 'vehicle' | 'maxMembers' | 'isPublic' | 'note' | 'coverImage' | 'durationDays'
 > & {
   tripType?: TripType;
   invitedUserIds: string[];

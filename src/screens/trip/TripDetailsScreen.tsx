@@ -83,7 +83,7 @@ const TripDetailsScreen = () => {
   // Custom Styled Popup Modal (ScanQR Style)
   const [confirmModal, setConfirmModal] = useState<{
     visible: boolean;
-    type: 'leave' | 'delete' | 'success' | 'error' | 'start';
+    type: 'leave' | 'delete' | 'success' | 'error' | 'start' | 'notice';
     title: string;
     message: string;
     confirmText: string;
@@ -172,12 +172,34 @@ const TripDetailsScreen = () => {
 
   const isLeader = trip?.leaderId === currentUserId || trip?.myRole === 'leader';
   const isTripActive = trip?.status === 'ACTIVE' || (trip?.status as string) === 'active';
+  const isTripCompleted = trip?.status === 'COMPLETED' || (trip?.status as string) === 'completed';
 
-  // Xuất phát ngay (CÓ POP-UP XÁC NHẬN CHẮC CHẮN THEO YÊU CẦU)
+  // Xuất phát ngay (CÂU 1: CHỈ TRƯỞNG ĐOÀN MỚI ĐƯỢC XUẤT PHÁT TRƯỚC GIỜ)
   const handleStartImmediately = () => {
     if (!trip) return;
+    if (isTripCompleted) {
+      setConfirmModal({
+        visible: true,
+        type: 'notice',
+        title: 'Chuyến đi đã hoàn thành',
+        message: 'Hành trình này đã kết thúc và được lưu vào danh sách các chuyến đi đã đi.',
+        confirmText: 'Đã hiểu',
+      });
+      return;
+    }
     if (isTripActive) {
       navigation.navigate('LiveTracking', { tripId: trip.id });
+      return;
+    }
+
+    if (!isLeader) {
+      setConfirmModal({
+        visible: true,
+        type: 'error',
+        title: 'Quyền hạn hạn chế',
+        message: 'Chỉ Trưởng đoàn mới có quyền xuất phát chuyến đi trước thời gian khởi hành!',
+        confirmText: 'Đã hiểu',
+      });
       return;
     }
 
@@ -375,13 +397,17 @@ const TripDetailsScreen = () => {
           />
           <View style={styles.heroOverlay} />
 
-          {/* Badges on top - ĐÃ BỎ BADGE KẾ HOẠCH THEO YÊU CẦU */}
+          {/* Badges on top */}
           <View style={styles.heroBadgeRow}>
             <View>
               {isTripActive ? (
                 <View style={[styles.statusBadge, { backgroundColor: C.success }]}>
                   <View style={styles.statusDot} />
                   <Text style={styles.statusBadgeText}>ĐANG DIỄN RA</Text>
+                </View>
+              ) : trip.status === 'COMPLETED' ? (
+                <View style={[styles.statusBadge, { backgroundColor: '#5D3A29' }]}>
+                  <Text style={styles.statusBadgeText}>ĐÃ HOÀN THÀNH</Text>
                 </View>
               ) : trip.status === 'LOCKED' || (trip.status as string) === 'locked' ? (
                 <View style={[styles.statusBadge, { backgroundColor: '#795548' }]}>
@@ -391,11 +417,22 @@ const TripDetailsScreen = () => {
               ) : null}
             </View>
 
-            {trip.tripType && (
-              <View style={styles.tierBadge}>
-                <Text style={styles.tierBadgeText}>HẠNG {trip.tripType.toUpperCase()}</Text>
-              </View>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* Số ngày ở lại (nằm bên trái Hạng Bronze) */}
+              {trip.durationDays && trip.durationDays > 0 ? (
+                <View style={styles.durationBadge}>
+                  <Text style={styles.durationBadgeText}>
+                    {trip.durationDays === 1 ? '1 NGÀY' : `${trip.durationDays}N${trip.durationDays - 1}Đ`}
+                  </Text>
+                </View>
+              ) : null}
+
+              {trip.tripType && (
+                <View style={styles.tierBadge}>
+                  <Text style={styles.tierBadgeText}>HẠNG {trip.tripType.toUpperCase()}</Text>
+                </View>
+              )}
+            </View>
           </View>
 
           {/* Hero Bottom Info */}
@@ -593,19 +630,19 @@ const TripDetailsScreen = () => {
 
       {/* Bottom Sticky Action Bar - ĐÃ XOÁ RỜI & HUỶ CHUYẾN Ở DƯỚI */}
       <View style={styles.bottomBar}>
-        {/* Nút hành động chính: "Xuất phát ngay" */}
+        {/* Nút hành động chính: "Xuất phát ngay" / "Vào theo dõi" / "Đã hoàn thành" */}
         <TouchableOpacity
-          style={styles.primaryBtn}
+          style={[styles.primaryBtn, isTripCompleted && { backgroundColor: C.sub }]}
           onPress={handleStartImmediately}
         >
           <MaterialCommunityIcons
-            name={isTripActive ? 'navigation-variant' : 'rocket-launch-outline'}
+            name={isTripActive ? 'navigation-variant' : isTripCompleted ? 'check-circle-outline' : 'rocket-launch-outline'}
             size={20}
             color="#FFF"
             style={{ marginRight: 8 }}
           />
           <Text style={styles.primaryBtnText}>
-            {isTripActive ? 'Vào theo dõi hành trình' : 'Xuất phát ngay'}
+            {isTripActive ? 'Vào theo dõi hành trình' : isTripCompleted ? 'Hành trình đã kết thúc' : 'Xuất phát ngay'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -954,6 +991,21 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: 0.5,
+  },
+  durationBadge: {
+    backgroundColor: 'rgba(205, 133, 84, 0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    marginRight: 6,
+  },
+  durationBadgeText: {
     fontSize: 11,
     fontWeight: '800',
     color: '#FFF',

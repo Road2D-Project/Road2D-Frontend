@@ -66,16 +66,23 @@ export function cleanNote(noteStr?: string): string {
   return noteStr
     .replace(/\s*\[dist:[\d.]+\]/g, '')
     .replace(/\s*\[tier:[a-z]+\]/g, '')
+    .replace(/\s*\[days:\d+\]/g, '')
     .trim();
 }
 
 function mapBackendTripToFrontend(b: any): Trip {
   const distanceKm = resolveTripDistance(b);
   let customTier = b.tripType || 'bronze';
+  let durationDays: number | undefined;
+
   if (b.note) {
     const tierMatch = String(b.note).match(/\[tier:([a-z]+)\]/);
     if (tierMatch && tierMatch[1]) {
       customTier = tierMatch[1];
+    }
+    const daysMatch = String(b.note).match(/\[days:(\d+)\]/);
+    if (daysMatch && daysMatch[1]) {
+      durationDays = parseInt(daysMatch[1], 10);
     }
   }
 
@@ -89,6 +96,7 @@ function mapBackendTripToFrontend(b: any): Trip {
     tripType: customTier,
     startAt: b.startTime || b.createdTime || new Date().toISOString(),
     endTime: b.endTime,
+    durationDays,
     vehicle: 'Xe máy',
     maxMembers: customTier === 'gold' ? 50 : customTier === 'silver' ? 30 : (b.memberLimit || 15),
     isPublic: !!b.visibility,
@@ -180,6 +188,22 @@ const tripService = {
         // ignore
       }
     }
+    // Nạp lộ trình thật đã lưu của chuyến đi
+    if (trip.id) {
+      try {
+        const cachedRouteStr = await AsyncStorage.getItem(`trip_route_${trip.id}`);
+        if (cachedRouteStr) {
+          const cachedRoute = JSON.parse(cachedRouteStr);
+          (trip as any).route = cachedRoute;
+          (trip as any).waypoints = cachedRoute.waypoints || [];
+          (trip as any).polylineCoords = cachedRoute.polylineCoords || [];
+          (trip as any).origin = cachedRoute.origin;
+          (trip as any).destination = cachedRoute.destination;
+        }
+      } catch {
+        // ignore
+      }
+    }
     try {
       const membersRes = await apiClient.get<any>(`/trips/${id}/members`);
       const membersList = Array.isArray(membersRes.data)
@@ -255,9 +279,10 @@ const tripService = {
 
     const distTag = payload.distanceKm ? ` [dist:${payload.distanceKm}]` : '';
     const tierTag = payload.tripType && payload.tripType !== 'bronze' ? ` [tier:${payload.tripType}]` : '';
+    const daysTag = payload.durationDays ? ` [days:${payload.durationDays}]` : '';
     const bePayload: any = {
       name: payload.name,
-      note: ((payload.note || '') + distTag + tierTag).trim(),
+      note: ((payload.note || '') + distTag + tierTag + daysTag).trim(),
       // Backend Go chỉ hỗ trợ chính sách giới hạn thành viên cho 'bronze' (15 seats).
       // Các hạng silver/gold chưa cấu hình policy nên bắt buộc gửi 'bronze' để không bị ErrTripTypePolicyUnset.
       tripType: 'bronze',
@@ -266,7 +291,12 @@ const tripService = {
     };
     if (payload.startAt) {
       try {
-        bePayload.startTime = new Date(payload.startAt).toISOString();
+        const startD = new Date(payload.startAt);
+        bePayload.startTime = startD.toISOString();
+        if (payload.durationDays) {
+          const endD = new Date(startD.getTime() + payload.durationDays * 24 * 60 * 60 * 1000);
+          bePayload.endTime = endD.toISOString();
+        }
       } catch {
         // Fallback
       }
@@ -274,6 +304,9 @@ const tripService = {
 
     const res = await apiClient.post<any>('/trips', bePayload);
     const trip = mapBackendTripToFrontend(res.data);
+    if (payload.durationDays) {
+      trip.durationDays = payload.durationDays;
+    }
     if (payload.tripType) {
       trip.tripType = payload.tripType;
       trip.maxMembers = payload.tripType === 'gold' ? 50 : payload.tripType === 'silver' ? 30 : 15;
@@ -403,6 +436,44 @@ const tripService = {
   /** DELETE /trips/:tripId/members/:userId - Kick member khỏi chuyến đi */
   kickMember: async (tripId: string, userId: string): Promise<void> => {
     await apiClient.delete(`/trips/${tripId}/members/${userId}`);
+  },
+
+  /** PATCH /trips/:id/active - Leader kích hoạt chuyến đi bắt đầu tracking realtime */
+  startTrip: async (tripId: string): Promise<{ message: string }> => {
+    if (USE_MOCK) {
+      await delay(300);
+      return { message: 'trip started' };
+    }
+    try {
+      const res = await apiClient.patch<{ message: string }>(`/trips/${tripId}/active`);
+      return res.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = String(err?.response?.data?.message || err?.response?.data?.error || '');
+      if (status === 409 || msg.includes('cannot activate') || msg.includes('already active')) {
+        return { message: 'trip already active' };
+      }
+      throw err;
+    }
+  },
+
+  /** POST /trips/:id/complete - Leader xác nhận hoàn tất / kết thúc chuyến đi */
+  completeTrip: async (tripId: string): Promise<{ message: string }> => {
+    if (USE_MOCK) {
+      await delay(300);
+      return { message: 'trip completed' };
+    }
+    try {
+      const res = await apiClient.post<{ message: string }>(`/trips/${tripId}/complete`);
+      return res.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = String(err?.response?.data?.message || err?.response?.data?.error || '');
+      if (status === 409 || msg.includes('already completed')) {
+        return { message: 'trip already completed' };
+      }
+      throw err;
+    }
   },
 };
 

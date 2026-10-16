@@ -9,6 +9,7 @@ import TeamRosterScreen from '../screens/trip/TeamRosterScreen';
 import LiveTrackingScreen from '../screens/map/LiveTrackingScreen';
 import CreateRouteScreen from '../screens/trip/CreateRouteScreen';
 import AllUpcomingTripsScreen from '../screens/home/AllUpcomingTripsScreen';
+import TripHistoryScreen from '../screens/home/TripHistoryScreen';
 import ConversationScreen from '../screens/chat/ConversationScreen';
 import ScanQRScreen from '../screens/trip/ScanQRScreen';
 import TabNavigator from './TabNavigator';
@@ -69,6 +70,7 @@ const AppNavigator = () => {
 
             {/* List screens */}
             <Stack.Screen name="AllUpcomingTrips" component={AllUpcomingTripsScreen} />
+            <Stack.Screen name="TripHistory" component={TripHistoryScreen} />
 
             {/* Chat */}
             <Stack.Screen name="Conversation" component={ConversationScreen} />

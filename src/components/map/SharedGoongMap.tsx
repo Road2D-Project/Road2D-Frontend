@@ -138,29 +138,33 @@ function buildMapHTML({
     status: m.status ?? 'normal',
   })));
 
-  const membersJS = members.length > 0 ? `
-    var MEMBERS = ${membersData};
-    MEMBERS.forEach(function(m) {
+  const membersJS = `
+    window.memberMarkers = window.memberMarkers || {};
+
+    var createMemberMarker = function(m) {
+      if (!m || !m.id || !m.lngLat) return null;
+      if (window.memberMarkers[m.id]) return window.memberMarkers[m.id];
+
       var wrap = document.createElement('div');
       wrap.className = 'marker-wrap';
 
       var markerDiv = document.createElement('div');
-      markerDiv.className = 'member-marker ' + m.status + ' ' + (m.role || 'member');
+      markerDiv.className = 'member-marker ' + (m.status || 'normal') + ' ' + (m.role || 'member');
 
       var img = document.createElement('img');
-      img.src = m.avatar;
-      img.alt = m.name;
+      img.src = m.avatar || 'https://ui-avatars.com/api/?name=User&background=CD853F&color=fff';
+      img.alt = m.name || 'Member';
       markerDiv.appendChild(img);
 
-      if (m.status !== 'normal') {
+      if (m.status && m.status !== 'normal') {
         var warnBadge = document.createElement('div');
         warnBadge.className = 'warning-badge';
-        warnBadge.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#8B0000" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
+        warnBadge.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#CD853F" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
         markerDiv.appendChild(warnBadge);
       }
 
       var triangle = document.createElement('div');
-      triangle.className = 'marker-triangle ' + m.status;
+      triangle.className = 'marker-triangle ' + (m.status || 'normal');
 
       wrap.appendChild(markerDiv);
       wrap.appendChild(triangle);
@@ -175,8 +179,38 @@ function buildMapHTML({
         .setLngLat(m.lngLat)
         .addTo(map);
 
-      window.memberMarkers = window.memberMarkers || {};
       window.memberMarkers[m.id] = marker;
+      return marker;
+    };
+
+    var MEMBERS = ${membersData};
+    MEMBERS.forEach(function(m) {
+      createMemberMarker(m);
+    });
+
+    window.isUserDragging = false;
+
+    map.on('dragstart', function() {
+      window.isUserDragging = true;
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'USER_DRAG' }));
+      }
+    });
+
+    map.on('touchstart', function() {
+      window.isUserDragging = true;
+    });
+
+    map.on('movestart', function(e) {
+      if (e && e.originalEvent) {
+        window.isUserDragging = true;
+      }
+    });
+
+    map.on('zoomstart', function(e) {
+      if (e && e.originalEvent) {
+        window.isUserDragging = true;
+      }
     });
 
     var handleMessage = function(event) {
@@ -185,17 +219,29 @@ function buildMapHTML({
         if (data.type === 'UPDATE_POSITION') {
           if (window.memberMarkers && window.memberMarkers[data.id]) {
             window.memberMarkers[data.id].setLngLat([data.lng, data.lat]);
+          } else {
+            createMemberMarker({
+              id: data.id,
+              name: data.name || 'Thành viên',
+              avatar: data.avatar || '',
+              role: data.role || 'member',
+              status: data.status || 'normal',
+              lngLat: [data.lng, data.lat],
+            });
           }
-          if (data.isMe) {
+          if (data.isMe && data.flyTo === true && !window.isUserDragging) {
             map.flyTo({ center: [data.lng, data.lat], speed: 0.5 });
           }
+        } else if (data.type === 'RECENTER' || data.type === 'FLY_TO') {
+          window.isUserDragging = false;
+          map.flyTo({ center: [data.lng, data.lat], zoom: data.zoom || 15, speed: 1.2 });
         }
       } catch(e) {}
     };
 
     window.addEventListener('message', handleMessage);
     document.addEventListener('message', handleMessage);
-  ` : '';
+  `;
 
   // Fit bounds logic
   const fitBoundsJS = (waypoints.length >= 2 || hasRoute) ? `
@@ -403,20 +449,30 @@ export const SharedGoongMap = forwardRef<WebView, SharedGoongMapProps>(
     },
     ref
   ) => {
+    const centerLng = waypoints.length > 0 ? waypoints[0].lng : initialCenter[0];
+    const centerLat = waypoints.length > 0 ? waypoints[0].lat : initialCenter[1];
+
     const center: [number, number] = useMemo(() => {
-      if (waypoints.length > 0) {
-        return [waypoints[0].lng, waypoints[0].lat];
-      }
-      if (members.length > 0) {
-        return [members[0].lng, members[0].lat];
-      }
-      return initialCenter;
-    }, [waypoints, members, initialCenter]);
+      return [centerLng, centerLat];
+    }, [centerLng, centerLat]);
 
     const zoom = useMemo(() => {
       if (waypoints.length > 1 || routeCoords.length > 0) return 9;
       return initialZoom;
     }, [waypoints.length, routeCoords.length, initialZoom]);
+
+    const waypointsKey = useMemo(() => {
+      return waypoints.map((w) => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}`).join(';');
+    }, [waypoints]);
+
+    const routeCoordsKey = useMemo(() => {
+      if (routeCoords.length === 0) return '';
+      return `${routeCoords.length}_${routeCoords[0][0].toFixed(4)}_${routeCoords[routeCoords.length - 1][0].toFixed(4)}`;
+    }, [routeCoords]);
+
+    const memberIdsKey = useMemo(() => {
+      return members.map((m) => m.id).join(',');
+    }, [members]);
 
     const html = useMemo(() => {
       return buildMapHTML({
@@ -428,7 +484,8 @@ export const SharedGoongMap = forwardRef<WebView, SharedGoongMapProps>(
         interactive,
         variant,
       });
-    }, [center, zoom, waypoints, routeCoords, members, interactive, variant]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [center[0], center[1], zoom, waypointsKey, routeCoordsKey, memberIdsKey, interactive, variant]);
 
     const handleMessage = (event: WebViewMessageEvent) => {
       try {
