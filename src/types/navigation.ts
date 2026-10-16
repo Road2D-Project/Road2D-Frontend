@@ -32,10 +32,15 @@ export type RootStackParamList = {
   Login: undefined;
   Home: undefined;           // chứa TabNavigator bên trong
   TripDetails: { tripId: string };
-  CreateTrip: { routeId?: string } | undefined;
+  CreateTrip: { routeId?: string; customRoute?: any } | undefined;
   TeamRoster: { tripId: string };
   LiveTracking: { tripId: string };
-  CreateRoute: undefined;
+  CreateRoute: {
+    initialOrigin?: any;
+    initialDestination?: any;
+    initialStops?: any[];
+    initialTripName?: string;
+  } | undefined;
   AllUpcomingTrips: undefined;
   TripHistory: undefined;
   Conversation: { chatId: string; chatName: string };

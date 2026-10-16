@@ -65,6 +65,25 @@ export const CustomDateTimePickerModal: React.FC<Props> = ({
     return day === 0 ? 6 : day - 1;
   }, [selectedYear, selectedMonth]);
 
+  // Tính toán số tuần và các ô ngày (đảm bảo Chủ Nhật không bao giờ bị rớt hàng hay trống)
+  const calendarWeeks = useMemo(() => {
+    const cells: Array<{ day: number | null }> = [];
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      cells.push({ day: null });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push({ day: d });
+    }
+    while (cells.length % 7 !== 0) {
+      cells.push({ day: null });
+    }
+    const weeks: Array<Array<{ day: number | null }>> = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      weeks.push(cells.slice(i, i + 7));
+    }
+    return weeks;
+  }, [firstDayOfWeek, daysInMonth]);
+
   const handlePrevMonth = () => {
     if (selectedMonth === 0) {
       setSelectedMonth(11);
@@ -189,46 +208,57 @@ export const CustomDateTimePickerModal: React.FC<Props> = ({
               {/* Weekdays */}
               <View style={styles.weekdayRow}>
                 {WEEKDAYS.map((w) => (
-                  <Text key={w} style={styles.weekdayText}>
-                    {w}
-                  </Text>
+                  <View key={w} style={styles.weekdayCol}>
+                    <Text
+                      style={[
+                        styles.weekdayText,
+                        w === 'CN' && { color: C.primary, fontWeight: '800' },
+                      ]}
+                    >
+                      {w}
+                    </Text>
+                  </View>
                 ))}
               </View>
 
-              {/* Days Grid */}
+              {/* Days Grid - Vẽ từng hàng tuần 7 ngày, đảm bảo Chủ Nhật không bao giờ trống */}
               <View style={styles.daysGrid}>
-                {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-                  <View key={`empty-${i}`} style={styles.dayCell} />
+                {calendarWeeks.map((week, weekIdx) => (
+                  <View key={`week-${weekIdx}`} style={styles.weekRow}>
+                    {week.map((cell, cellIdx) => {
+                      if (cell.day === null) {
+                        return <View key={`empty-${weekIdx}-${cellIdx}`} style={styles.dayCell} />;
+                      }
+                      const isSelected = cell.day === selectedDay;
+
+                      return (
+                        <TouchableOpacity
+                          key={`day-${cell.day}`}
+                          style={[styles.dayCell, isSelected && styles.dayCellSelected]}
+                          onPress={() => setSelectedDay(cell.day!)}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.dayText,
+                              isSelected && styles.dayTextSelected,
+                              cellIdx === 6 && !isSelected && { color: C.primaryDark },
+                            ]}
+                          >
+                            {cell.day}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 ))}
-
-                {Array.from({ length: daysInMonth }).map((_, i) => {
-                  const dayNum = i + 1;
-                  const isSelected = dayNum === selectedDay;
-
-                  return (
-                    <TouchableOpacity
-                      key={`day-${dayNum}`}
-                      style={[styles.dayCell, isSelected && styles.dayCellSelected]}
-                      onPress={() => setSelectedDay(dayNum)}
-                    >
-                      <Text
-                        style={[
-                          styles.dayText,
-                          isSelected && styles.dayTextSelected,
-                        ]}
-                      >
-                        {dayNum}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
               </View>
             </View>
           ) : (
-            /* Tab 2: Time Picker (Hour & Minute) */
+            /* Tab 2: Time Picker (Hour & Minute - Hệ 24h dạng 2 cột trực quan) */
             <View style={styles.timeWrap}>
               <View style={styles.timeCol}>
-                <Text style={styles.timeColLabel}>GIỜ</Text>
+                <Text style={styles.timeColLabel}>GIỜ (0 - 23H)</Text>
                 <ScrollView
                   style={styles.timeScroll}
                   showsVerticalScrollIndicator={false}
@@ -253,10 +283,12 @@ export const CustomDateTimePickerModal: React.FC<Props> = ({
                 </ScrollView>
               </View>
 
-              <View style={styles.timeDivider} />
+              <View style={styles.timeCenterDivider}>
+                <Text style={styles.timeColonText}>:</Text>
+              </View>
 
               <View style={styles.timeCol}>
-                <Text style={styles.timeColLabel}>PHÚT</Text>
+                <Text style={styles.timeColLabel}>PHÚT (0 - 55P)</Text>
                 <ScrollView
                   style={styles.timeScroll}
                   showsVerticalScrollIndicator={false}
@@ -273,7 +305,7 @@ export const CustomDateTimePickerModal: React.FC<Props> = ({
                         <Text
                           style={[styles.timeItemText, isSelected && styles.timeItemTextSelected]}
                         >
-                          :{pad(m)}
+                          {pad(m)}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -413,29 +445,36 @@ const styles = StyleSheet.create({
   },
   weekdayRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    width: '100%',
     marginBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6DE',
     paddingBottom: 6,
   },
+  weekdayCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   weekdayText: {
-    width: 38,
     textAlign: 'center',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     color: C.sub,
   },
   daysGrid: {
+    width: '100%',
+  },
+  weekRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    width: '100%',
+    marginVertical: 2,
   },
   dayCell: {
-    width: `${100 / 7}%`,
+    flex: 1,
     height: 38,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 2,
     borderRadius: 19,
   },
   dayCellSelected: {
@@ -448,10 +487,11 @@ const styles = StyleSheet.create({
   },
   dayTextSelected: {
     color: '#FFF',
-    fontWeight: '700',
+    fontWeight: '800',
   },
   timeWrap: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: C.card,
     borderRadius: 16,
     padding: 14,
@@ -461,10 +501,11 @@ const styles = StyleSheet.create({
   },
   timeCol: {
     flex: 1,
+    height: '100%',
   },
   timeColLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     color: C.sub,
     textAlign: 'center',
     marginBottom: 8,
@@ -489,12 +530,18 @@ const styles = StyleSheet.create({
   },
   timeItemTextSelected: {
     color: '#FFF',
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  timeDivider: {
-    width: 1,
-    backgroundColor: C.border,
-    marginHorizontal: 10,
+  timeCenterDivider: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  timeColonText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: C.primary,
+    marginTop: 18,
   },
   actionRow: {
     flexDirection: 'row',

@@ -24,6 +24,7 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -171,13 +172,117 @@ const CreateTripScreen = () => {
     return d;
   }, []);
   const [departureDate, setDepartureDate] = useState<Date>(defaultDeparture);
-  const [durationDays, setDurationDays] = useState<number>(2); // Mặc định 2 ngày 1 đêm
+  const [stayDays, setStayDays] = useState<number>(2); // Số ngày ở lại
+  const [stayNights, setStayNights] = useState<number>(1); // Số đêm ở lại
+  const durationDays = stayDays;
   const [note, setNote] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [isRequireApproval, setIsRequireApproval] = useState(false);
   const [maxMembers, setMaxMembers] = useState('15');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tripType, setTripType] = useState<TripTypeKey>('bronze');
+
+  // Chặn nút back cứng trên Android ở Bước 4 sau khi tạo trip xong
+  useEffect(() => {
+    if (step === 3) {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        (navigation as any).navigate('Home');
+        return true;
+      });
+      return () => sub.remove();
+    }
+  }, [step, navigation]);
+
+  // Chọn từ chuyến đi cũ đã đi -> dẫn tới Bước 1 CreateRoute kèm dữ liệu có sẵn
+  const handleSelectPastTripToCreateRoute = (t: any) => {
+    let originDetail = null;
+    let destDetail = null;
+    let stopWaypoints: any[] = [];
+
+    if (Array.isArray(t.waypoints) && t.waypoints.length >= 2) {
+      originDetail = {
+        place_id: t.waypoints[0].id || 'origin_' + t.id,
+        name: t.waypoints[0].name || 'Điểm xuất phát',
+        address: t.waypoints[0].name || '',
+        lat: t.waypoints[0].lat,
+        lng: t.waypoints[0].lng,
+      };
+      destDetail = {
+        place_id: t.waypoints[t.waypoints.length - 1].id || 'dest_' + t.id,
+        name: t.waypoints[t.waypoints.length - 1].name || 'Điểm đến',
+        address: t.waypoints[t.waypoints.length - 1].name || '',
+        lat: t.waypoints[t.waypoints.length - 1].lat,
+        lng: t.waypoints[t.waypoints.length - 1].lng,
+      };
+      if (t.waypoints.length > 2) {
+        stopWaypoints = t.waypoints.slice(1, -1).map((w: any, idx: number) => ({
+          place_id: w.id || `stop_${idx}`,
+          name: w.name || `Trạm dừng ${idx + 1}`,
+          address: w.name || '',
+          lat: w.lat,
+          lng: w.lng,
+          stayMinutes: 15,
+        }));
+      }
+    } else {
+      const nameLower = (t.name || t.routeName || '').toLowerCase();
+      if (nameLower.includes('bến thành') || nameLower.includes('hồ chí minh') || nameLower.includes('uit')) {
+        originDetail = {
+          place_id: 'ben_thanh',
+          name: 'Chợ Bến Thành',
+          address: 'Phường Bến Thành, Quận 1, TP. Hồ Chí Minh',
+          lat: 10.7725,
+          lng: 106.6980,
+        };
+        destDetail = {
+          place_id: 'uit_hcm',
+          name: 'Trường Đại học Công nghệ Thông tin - ĐHQG TP.HCM',
+          address: 'Khu phố 6, Phường Linh Trung, TP. Thủ Đức',
+          lat: 10.8700,
+          lng: 106.8031,
+        };
+      } else {
+        originDetail = {
+          place_id: 'origin_' + t.id,
+          name: (t.name || t.routeName || 'Điểm xuất phát').split(' - ')[0],
+          address: 'Điểm khởi hành hành trình',
+          lat: 10.7725,
+          lng: 106.6980,
+        };
+        destDetail = {
+          place_id: 'dest_' + t.id,
+          name: (t.name || t.routeName || 'Điểm đến').split(' - ')[1] || 'Đích đến',
+          address: 'Điểm kết thúc hành trình',
+          lat: 10.8700,
+          lng: 106.8031,
+        };
+      }
+    }
+
+    if (Array.isArray(t.stops) && t.stops.length > 0 && stopWaypoints.length === 0) {
+      stopWaypoints = t.stops.map((s: any, idx: number) => ({
+        place_id: s.id || `stop_${idx}`,
+        name: s.name || `Trạm dừng ${idx + 1}`,
+        address: s.address || '',
+        lat: s.lat || 10.8000,
+        lng: s.lng || 106.7500,
+        stayMinutes: s.stayMinutes || 15,
+      }));
+    }
+
+    setShowAllTripsModal(false);
+    if (!tripName) {
+      setTripName(t.name || t.routeName);
+    }
+
+    // Điều hướng tới bước 1 create route để người dùng xem trước và có thể đảo chiều
+    (navigation as any).navigate('CreateRoute', {
+      initialOrigin: originDetail,
+      initialDestination: destDetail,
+      initialStops: stopWaypoints,
+      initialTripName: t.name || t.routeName,
+    });
+  };
 
   const formatDepartureDisplay = (d: Date) => {
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -315,18 +420,23 @@ const CreateTripScreen = () => {
         ? Math.round((selectedRoute.distanceM / 1000) * 10) / 10
         : (parseFloat(selectedRoute.distance) || selectedRoute.distanceKm || 0);
 
+      const durationNote = stayNights > 0 ? `${stayDays} ngày ${stayNights} đêm` : `${stayDays} ngày`;
+      const finalNote = note.trim()
+        ? `${note.trim()}\n(Thời gian ở lại: ${durationNote})`
+        : `Thời gian ở lại: ${durationNote}`;
+
       const payload = {
         name: tripName || selectedRoute.name,
         routeId: selectedRoute.id,
         routeName: selectedRoute.name,
         distanceKm: realDist,
         startAt: departureDate.toISOString(),
-        durationDays,
+        durationDays: stayDays,
         vehicle: vehicle as any,
         tripType,
         maxMembers: parseInt(maxMembers) || 15,
         isPublic,
-        note,
+        note: finalNote,
         invitedUserIds: selectedFriends,
         coverImage: selectedRoute.image,
       };
@@ -517,25 +627,7 @@ const CreateTripScreen = () => {
                   key={t.id}
                   style={[styles.routeCard, isSelected && styles.routeCardActive]}
                   activeOpacity={0.85}
-                  onPress={() => {
-                    const stopsCnt = Array.isArray(t.stops)
-                      ? t.stops.length
-                      : (typeof t.stops === 'number' ? t.stops : 0);
-                    setSelectedRoute({
-                      id: t.id,
-                      name: t.name || t.routeName,
-                      distance: `${t.distanceKm || 0} km`,
-                      distanceKm: t.distanceKm || 0,
-                      duration: t.duration || `${Math.max(15, Math.round(((t.distanceKm || 10) / 35) * 60))} phút`,
-                      stops: Array.isArray(t.stops) ? t.stops : [],
-                      stopsCount: stopsCnt,
-                      image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
-                      isPastTrip: true,
-                    });
-                    if (!tripName) {
-                      setTripName(t.name || t.routeName);
-                    }
-                  }}
+                  onPress={() => handleSelectPastTripToCreateRoute(t)}
                 >
                   <Image
                     source={{
@@ -721,31 +813,98 @@ const CreateTripScreen = () => {
           }}
         />
 
-        {/* Số ngày hành trình (ở lại) */}
+        {/* Thời gian ở lại: Cho phép nhập số ngày và số đêm */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 8 }}>
-          <Text style={[styles.fieldLabel, { marginTop: 0, marginBottom: 0 }]}>Thời gian ở lại (Hành trình)</Text>
-          <Text style={{ fontSize: 12, color: C.primary, fontWeight: '700' }}>
-            {DURATION_OPTIONS.find((o) => o.days === durationDays)?.sub || `${durationDays} ngày`}
+          <Text style={[styles.fieldLabel, { marginTop: 0, marginBottom: 0 }]}>Thời gian ở lại</Text>
+          <Text style={{ fontSize: 13, color: C.primary, fontWeight: '700' }}>
+            {stayDays} ngày {stayNights > 0 ? `${stayNights} đêm` : ''}
           </Text>
         </View>
-        <View style={styles.durationRow}>
-          {DURATION_OPTIONS.map((opt) => {
-            const isSelected = durationDays === opt.days;
-            return (
+
+        <View style={styles.stayCustomInputRow}>
+          {/* Cột Số ngày */}
+          <View style={styles.stayInputCard}>
+            <Text style={styles.stayCardLabel}>SỐ NGÀY</Text>
+            <View style={styles.stayStepperRow}>
               <TouchableOpacity
-                key={opt.days}
-                style={[styles.durationBtn, isSelected && styles.durationBtnActive]}
-                onPress={() => setDurationDays(opt.days)}
+                style={styles.stayStepperBtn}
+                onPress={() => setStayDays(Math.max(1, stayDays - 1))}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.durationBtnTitle, isSelected && styles.durationBtnTitleActive]}>
-                  {opt.label}
-                </Text>
-                <Text
-                  style={[styles.durationBtnSub, isSelected && styles.durationBtnSubActive]}
-                  numberOfLines={1}
-                >
-                  {opt.days === 1 ? '1 ngày' : `${opt.days}N${opt.days - 1}Đ`}
+                <Ionicons name="remove" size={16} color={C.heading} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.stayNumberInput}
+                keyboardType="numeric"
+                value={String(stayDays)}
+                onChangeText={(val) => {
+                  const n = parseInt(val.replace(/[^0-9]/g, ''), 10);
+                  setStayDays(isNaN(n) ? 1 : Math.max(1, Math.min(60, n)));
+                }}
+              />
+              <TouchableOpacity
+                style={styles.stayStepperBtn}
+                onPress={() => setStayDays(Math.min(60, stayDays + 1))}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={16} color={C.heading} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Cột Số đêm */}
+          <View style={styles.stayInputCard}>
+            <Text style={styles.stayCardLabel}>SỐ ĐÊM</Text>
+            <View style={styles.stayStepperRow}>
+              <TouchableOpacity
+                style={styles.stayStepperBtn}
+                onPress={() => setStayNights(Math.max(0, stayNights - 1))}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="remove" size={16} color={C.heading} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.stayNumberInput}
+                keyboardType="numeric"
+                value={String(stayNights)}
+                onChangeText={(val) => {
+                  const n = parseInt(val.replace(/[^0-9]/g, ''), 10);
+                  setStayNights(isNaN(n) ? 0 : Math.max(0, Math.min(60, n)));
+                }}
+              />
+              <TouchableOpacity
+                style={styles.stayStepperBtn}
+                onPress={() => setStayNights(Math.min(60, stayNights + 1))}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={16} color={C.heading} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Quick select chips */}
+        <View style={styles.stayQuickRow}>
+          {[
+            { label: '1 ngày', days: 1, nights: 0 },
+            { label: '2N1Đ', days: 2, nights: 1 },
+            { label: '3N2Đ', days: 3, nights: 2 },
+            { label: '4N3Đ', days: 4, nights: 3 },
+            { label: '5N4Đ', days: 5, nights: 4 },
+          ].map((preset) => {
+            const isPresetActive = stayDays === preset.days && stayNights === preset.nights;
+            return (
+              <TouchableOpacity
+                key={preset.label}
+                style={[styles.stayChip, isPresetActive && styles.stayChipActive]}
+                onPress={() => {
+                  setStayDays(preset.days);
+                  setStayNights(preset.nights);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.stayChipText, isPresetActive && styles.stayChipTextActive]}>
+                  {preset.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -1138,9 +1297,13 @@ const CreateTripScreen = () => {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={goBack}>
-          <Ionicons name="arrow-back" size={22} color={C.heading} />
-        </TouchableOpacity>
+        {step !== 3 ? (
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Ionicons name="arrow-back" size={22} color={C.heading} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
         <Text style={styles.headerTitle}>{STEP_LABELS[step]}</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1203,24 +1366,8 @@ const CreateTripScreen = () => {
                     key={t.id}
                     style={[styles.modalTripItem, isSelected && styles.modalTripItemSelected]}
                     onPress={() => {
-                      const stopsCnt = Array.isArray(t.stops)
-                        ? t.stops.length
-                        : (typeof t.stops === 'number' ? t.stops : 0);
-                      setSelectedRoute({
-                        id: t.id,
-                        name: t.name || t.routeName,
-                        distance: `${t.distanceKm || 0} km`,
-                        distanceKm: t.distanceKm || 0,
-                        duration: t.duration || `${Math.max(15, Math.round(((t.distanceKm || 10) / 35) * 60))} phút`,
-                        stops: Array.isArray(t.stops) ? t.stops : [],
-                        stopsCount: stopsCnt,
-                        image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=600',
-                        isPastTrip: true,
-                      });
-                      if (!tripName) {
-                        setTripName(t.name || t.routeName);
-                      }
                       setShowAllTripsModal(false);
+                      handleSelectPastTripToCreateRoute(t);
                     }}
                   >
                     <View style={{ flex: 1 }}>
@@ -2455,6 +2602,84 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   durationBtnSubActive: {
+    color: C.primary,
+    fontWeight: '700',
+  },
+  stayCustomInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 10,
+  },
+  stayInputCard: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  stayCardLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.sub,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  stayStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stayStepperBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FAF5EE',
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stayNumberInput: {
+    minWidth: 44,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#FAF5EE',
+    borderWidth: 1,
+    borderColor: C.border,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.heading,
+    paddingHorizontal: 4,
+    paddingVertical: 0,
+  },
+  stayQuickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  stayChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  stayChipActive: {
+    backgroundColor: '#FAF5EE',
+    borderColor: C.primary,
+  },
+  stayChipText: {
+    fontSize: 12,
+    color: C.sub,
+    fontWeight: '600',
+  },
+  stayChipTextActive: {
     color: C.primary,
     fontWeight: '700',
   },

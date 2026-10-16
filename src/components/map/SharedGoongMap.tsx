@@ -39,6 +39,8 @@ export interface SharedGoongMapProps {
   initialZoom?: number;
   waypoints?: MapWaypoint[];
   routeCoords?: [number, number][]; // [[lng, lat], ...]
+  secondaryRouteCoords?: [number, number][]; // [[lng, lat], ...]
+  searchedMarker?: { lat: number; lng: number } | null;
   members?: MapMember[];
   interactive?: boolean;
   variant?: 'brown' | 'default'; // 'brown': tone nâu sang trọng; 'default': style sáng nguyên bản của Goong
@@ -50,6 +52,7 @@ const BRAND = {
   mapBg: '#1A120B',          // Nền bản đồ nâu đen espresso sang trọng
   routeMain: '#E67E22',       // Tuyến chính cam đất Road2D sắc nét
   routeGlow: '#B86B30',       // Bóng đổ phát sáng cam nâu
+  routeSecondary: '#6D3B1C',  // Tuyến đường phụ / tìm kiếm (Nâu đậm hơn tuyến chính)
   waterFill: '#3D2D20',       // Sông ngòi, ao hồ, biển: Màu nâu trầm ấm, KHÔNG ĐEN XÌ
   waterLine: '#574130',       // Viền bờ sông hồ nâu sáng tinh tế
   landcover: '#241910',       // Nền đất tự nhiên
@@ -65,6 +68,8 @@ function buildMapHTML({
   zoom,
   waypoints,
   routeCoords,
+  secondaryRouteCoords = [],
+  searchedMarker = null,
   members,
   interactive,
   variant = 'brown',
@@ -73,6 +78,8 @@ function buildMapHTML({
   zoom: number;
   waypoints: MapWaypoint[];
   routeCoords: [number, number][];
+  secondaryRouteCoords?: [number, number][];
+  searchedMarker?: { lat: number; lng: number } | null;
   members: MapMember[];
   interactive: boolean;
   variant?: 'brown' | 'default';
@@ -80,6 +87,8 @@ function buildMapHTML({
   const isBrown = variant === 'brown';
   const routeGeoJSON = JSON.stringify(routeCoords);
   const hasRoute = routeCoords.length >= 2;
+  const secondaryGeoJSON = JSON.stringify(secondaryRouteCoords);
+  const hasSecondaryRoute = secondaryRouteCoords.length >= 2;
 
   // Render Waypoint markers với tone màu nâu chủ đạo của Road2D và tag nhãn ở phía trên
   const waypointsJS = waypoints.map((wp, i) => {
@@ -235,6 +244,73 @@ function buildMapHTML({
         } else if (data.type === 'RECENTER' || data.type === 'FLY_TO') {
           window.isUserDragging = false;
           map.flyTo({ center: [data.lng, data.lat], zoom: data.zoom || 15, speed: 1.2 });
+        } else if (data.type === 'SHOW_SEARCHED_LOCATION') {
+          if (window.searchedMarkerInstance) {
+            window.searchedMarkerInstance.remove();
+            window.searchedMarkerInstance = null;
+          }
+          var wrap = document.createElement('div');
+          wrap.style.cssText = 'cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:center;';
+          var pin = document.createElement('div');
+          pin.style.cssText = 'width:28px;height:28px;border-radius:50% 50% 50% 0;background:#6D3B1C;transform:rotate(-45deg);border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,0.45);';
+          var inner = document.createElement('div');
+          inner.style.cssText = 'transform:rotate(45deg);display:flex;align-items:center;justify-content:center;';
+          inner.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+          pin.appendChild(inner);
+          wrap.appendChild(pin);
+          window.searchedMarkerInstance = new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
+            .setLngLat([data.lng, data.lat])
+            .addTo(map);
+          window.isUserDragging = false;
+          map.flyTo({ center: [data.lng, data.lat], zoom: 15, speed: 1.2 });
+        } else if (data.type === 'CLEAR_SEARCHED_LOCATION') {
+          if (window.searchedMarkerInstance) {
+            window.searchedMarkerInstance.remove();
+            window.searchedMarkerInstance = null;
+          }
+        } else if (data.type === 'SET_SECONDARY_ROUTE') {
+          if (map.getSource('secondary-route')) {
+            map.getSource('secondary-route').setData({
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: data.coords }
+            });
+          } else {
+            map.addSource('secondary-route', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'LineString', coordinates: data.coords }
+              }
+            });
+            map.addLayer({
+              id: 'secondary-route-glow',
+              type: 'line',
+              source: 'secondary-route',
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': 'rgba(109, 59, 28, 0.4)',
+                'line-width': 9,
+                'line-opacity': 0.4
+              }
+            });
+            map.addLayer({
+              id: 'secondary-route-main',
+              type: 'line',
+              source: 'secondary-route',
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': '#6D3B1C',
+                'line-width': 5.0,
+                'line-opacity': 0.95
+              }
+            });
+          }
+        } else if (data.type === 'CLEAR_SECONDARY_ROUTE') {
+          if (map.getLayer('secondary-route-main')) map.removeLayer('secondary-route-main');
+          if (map.getLayer('secondary-route-glow')) map.removeLayer('secondary-route-glow');
+          if (map.getSource('secondary-route')) map.removeSource('secondary-route');
         }
       } catch(e) {}
     };
@@ -424,6 +500,56 @@ function buildMapHTML({
       });
     ` : ''}
 
+    ${hasSecondaryRoute ? `
+      map.addSource('secondary-route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: ${secondaryGeoJSON} }
+        }
+      });
+      map.addLayer({
+        id: 'secondary-route-glow',
+        type: 'line',
+        source: 'secondary-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': 'rgba(109, 59, 28, 0.4)',
+          'line-width': 9,
+          'line-opacity': 0.4
+        }
+      });
+      map.addLayer({
+        id: 'secondary-route-main',
+        type: 'line',
+        source: 'secondary-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#6D3B1C',
+          'line-width': 5.0,
+          'line-opacity': 0.95
+        }
+      });
+    ` : ''}
+
+    ${searchedMarker ? `
+      (function() {
+        var wrap = document.createElement('div');
+        wrap.style.cssText = 'cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:center;';
+        var pin = document.createElement('div');
+        pin.style.cssText = 'width:28px;height:28px;border-radius:50% 50% 50% 0;background:#6D3B1C;transform:rotate(-45deg);border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,0.45);';
+        var inner = document.createElement('div');
+        inner.style.cssText = 'transform:rotate(45deg);display:flex;align-items:center;justify-content:center;';
+        inner.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+        pin.appendChild(inner);
+        wrap.appendChild(pin);
+        window.searchedMarkerInstance = new maplibregl.Marker({ element: wrap, anchor: 'bottom' })
+          .setLngLat([${searchedMarker.lng}, ${searchedMarker.lat}])
+          .addTo(map);
+      })();
+    ` : ''}
+
     ${waypointsJS}
     ${membersJS}
     ${fitBoundsJS}
@@ -441,6 +567,8 @@ export const SharedGoongMap = forwardRef<WebView, SharedGoongMapProps>(
       initialZoom = 11,
       waypoints = [],
       routeCoords = [],
+      secondaryRouteCoords = [],
+      searchedMarker = null,
       members = [],
       interactive = true,
       variant = 'brown',
@@ -470,6 +598,13 @@ export const SharedGoongMap = forwardRef<WebView, SharedGoongMapProps>(
       return `${routeCoords.length}_${routeCoords[0][0].toFixed(4)}_${routeCoords[routeCoords.length - 1][0].toFixed(4)}`;
     }, [routeCoords]);
 
+    const secondaryRouteKey = useMemo(() => {
+      if (secondaryRouteCoords.length === 0) return '';
+      return `${secondaryRouteCoords.length}_${secondaryRouteCoords[0][0].toFixed(4)}_${secondaryRouteCoords[secondaryRouteCoords.length - 1][0].toFixed(4)}`;
+    }, [secondaryRouteCoords]);
+
+    const searchedMarkerKey = searchedMarker ? `${searchedMarker.lat.toFixed(5)},${searchedMarker.lng.toFixed(5)}` : '';
+
     const memberIdsKey = useMemo(() => {
       return members.map((m) => m.id).join(',');
     }, [members]);
@@ -480,12 +615,14 @@ export const SharedGoongMap = forwardRef<WebView, SharedGoongMapProps>(
         zoom,
         waypoints,
         routeCoords,
+        secondaryRouteCoords,
+        searchedMarker,
         members,
         interactive,
         variant,
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [center[0], center[1], zoom, waypointsKey, routeCoordsKey, memberIdsKey, interactive, variant]);
+    }, [center[0], center[1], zoom, waypointsKey, routeCoordsKey, secondaryRouteKey, searchedMarkerKey, memberIdsKey, interactive, variant]);
 
     const handleMessage = (event: WebViewMessageEvent) => {
       try {

@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Image,
@@ -22,7 +23,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { goongMapService } from '../../services/api/goongMapService';
+import { goongMapService, PlacePrediction } from '../../services/api/goongMapService';
 // @ts-ignore
 const polyline: any = require('@mapbox/polyline');
 
@@ -214,6 +215,118 @@ const LiveTrackingScreen = () => {
 
   const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [showCheckIn, setShowCheckIn] = useState(false);
+
+  // ── Tìm kiếm địa điểm nhanh trên bản đồ Tracking ──
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchPredictions, setSearchPredictions] = useState<PlacePrediction[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Địa điểm đã tìm kiếm
+  const [searchedPlace, setSearchedPlace] = useState<{
+    name: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
+
+  // Tuyến đường phụ dẫn tới điểm vừa tìm
+  const [secondaryRouteCoords, setSecondaryRouteCoords] = useState<[number, number][]>([]);
+  const [isCalculatingSecondaryRoute, setIsCalculatingSecondaryRoute] = useState(false);
+
+  // Xử lý tìm kiếm autocomplete
+  const handleSearchQueryChange = (text: string) => {
+    setSearchQuery(text);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!text.trim() || text.trim().length < 2) {
+      setSearchPredictions([]);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      const results = await goongMapService.searchPlaces(text);
+      setSearchPredictions(results);
+      setIsSearching(false);
+    }, 350);
+  };
+
+  const handleSelectSearchedPlace = async (pred: PlacePrediction) => {
+    setIsSearching(true);
+    const detail = await goongMapService.getPlaceDetail(pred.place_id);
+    setIsSearching(false);
+    if (!detail) return;
+
+    const newPlace = {
+      name: detail.name || pred.description,
+      lat: detail.lat,
+      lng: detail.lng,
+    };
+    setSearchedPlace(newPlace);
+    setSecondaryRouteCoords([]); // Reset route tới điểm cũ nếu có
+    setIsSearchOpen(false);
+    setSearchQuery('');
+    setSearchPredictions([]);
+
+    // Gửi lệnh sang WebView vẽ marker màu nâu (không chữ) và di chuyển camera tới
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: 'SHOW_SEARCHED_LOCATION',
+        lat: detail.lat,
+        lng: detail.lng,
+        name: detail.name,
+      })
+    );
+  };
+
+  const handleClearSearchedPlace = () => {
+    setSearchedPlace(null);
+    setSecondaryRouteCoords([]);
+    webViewRef.current?.postMessage(JSON.stringify({ type: 'CLEAR_SEARCHED_LOCATION' }));
+    webViewRef.current?.postMessage(JSON.stringify({ type: 'CLEAR_SECONDARY_ROUTE' }));
+  };
+
+  const handleToggleSearchedRoute = async () => {
+    if (!searchedPlace) return;
+    if (secondaryRouteCoords.length > 0) {
+      // Đang hiển thị thì ẩn tuyến đường phụ đi
+      setSecondaryRouteCoords([]);
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'CLEAR_SECONDARY_ROUTE' }));
+      return;
+    }
+
+    // Lấy toạ độ vị trí hiện tại của mình
+    let myLat = currentPosition?.latitude || 21.0285;
+    let myLng = currentPosition?.longitude || 105.8542;
+    if (trackingMode === 'gps' && userLocation) {
+      myLat = userLocation.lat;
+      myLng = userLocation.lng;
+    } else {
+      const me = trackedMembers.find((m) => m.id === currentUserId || m.id === 'u1');
+      if (me && me.lngLat) {
+        myLng = me.lngLat[0];
+        myLat = me.lngLat[1];
+      }
+    }
+
+    setIsCalculatingSecondaryRoute(true);
+    const leg = await goongMapService.getDirections(
+      { lat: myLat, lng: myLng },
+      { lat: searchedPlace.lat, lng: searchedPlace.lng }
+    );
+    setIsCalculatingSecondaryRoute(false);
+
+    if (leg && leg.coords && leg.coords.length > 0) {
+      setSecondaryRouteCoords(leg.coords);
+      webViewRef.current?.postMessage(
+        JSON.stringify({
+          type: 'SET_SECONDARY_ROUTE',
+          coords: leg.coords,
+        })
+      );
+    } else {
+      Alert.alert('Thông báo', 'Không tìm thấy đường đi tới địa điểm này.');
+    }
+  };
 
   // Pin thật từ thiết bị và tín hiệu kết nối
   const [deviceBattery, setDeviceBattery] = useState<number>(100);
@@ -1056,6 +1169,8 @@ const LiveTrackingScreen = () => {
           initialZoom={13}
           waypoints={mapWaypoints}
           routeCoords={routePolylineCoords}
+          secondaryRouteCoords={secondaryRouteCoords}
+          searchedMarker={searchedPlace ? { lat: searchedPlace.lat, lng: searchedPlace.lng } : null}
           members={mapMembers}
           onMarkerPress={(memberId) => {
             const member = trackedMembers.find((m) => m.id === memberId);
@@ -1133,7 +1248,7 @@ const LiveTrackingScreen = () => {
             )}
           </View>
 
-          {/* Sub Header: SOS + List toggle */}
+          {/* Sub Header: SOS + Search location */}
           <View style={styles.subHeaderRow} pointerEvents="box-none">
             <TouchableOpacity
               style={styles.sosButton}
@@ -1149,17 +1264,93 @@ const LiveTrackingScreen = () => {
               <Text style={styles.sosText}>SOS</Text>
             </TouchableOpacity>
 
+            {/* Nút Tìm kiếm địa điểm trên bản đồ */}
             <TouchableOpacity
-              style={styles.headerIconButton}
-              onPress={() => setViewMode(viewMode === 'map' ? 'list' : 'map')}
+              style={[styles.headerIconButton, isSearchOpen && { backgroundColor: colors.primary }]}
+              onPress={() => setIsSearchOpen((prev) => !prev)}
+              activeOpacity={0.8}
             >
               <Ionicons
-                name={viewMode === 'map' ? 'list-outline' : 'map-outline'}
+                name="search-outline"
                 size={20}
-                color={colors.textPrimary}
+                color={isSearchOpen ? '#FFFFFF' : colors.textPrimary}
               />
             </TouchableOpacity>
           </View>
+
+          {/* Panel Tìm kiếm địa điểm nổi trên bản đồ */}
+          {isSearchOpen && (
+            <View style={styles.searchFloatingPanel}>
+              <View style={styles.searchBarRow}>
+                <Ionicons name="search" size={17} color={colors.primary} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.searchBarInput}
+                  placeholder="Tìm địa điểm trên bản đồ..."
+                  placeholderTextColor="#A0938C"
+                  value={searchQuery}
+                  onChangeText={handleSearchQueryChange}
+                  autoFocus
+                  returnKeyType="search"
+                />
+                {isSearching ? (
+                  <ActivityIndicator size="small" color={colors.primary} style={{ marginHorizontal: 4 }} />
+                ) : searchQuery.length > 0 ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSearchQuery('');
+                      setSearchPredictions([]);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#A0938C" />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.searchBarCloseBtn}
+                  onPress={() => {
+                    setIsSearchOpen(false);
+                    setSearchQuery('');
+                    setSearchPredictions([]);
+                  }}
+                >
+                  <Text style={styles.searchBarCloseText}>Đóng</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Danh sách gợi ý Autocomplete */}
+              {searchPredictions.length > 0 && (
+                <ScrollView
+                  style={styles.searchPredList}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                >
+                  {searchPredictions.map((pred) => (
+                    <TouchableOpacity
+                      key={pred.place_id}
+                      style={styles.searchPredItem}
+                      onPress={() => handleSelectSearchedPlace(pred)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="location-outline"
+                        size={18}
+                        color={colors.primary}
+                        style={{ marginRight: 10, marginTop: 2 }}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.searchPredTitle} numberOfLines={1}>
+                          {pred.structured_formatting?.main_text || pred.description}
+                        </Text>
+                        <Text style={styles.searchPredSub} numberOfLines={1}>
+                          {pred.structured_formatting?.secondary_text || pred.description}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          )}
 
           {/* Banner thông báo chế độ nghỉ chân khi được kích hoạt */}
           {isStayMode && (
@@ -1183,6 +1374,45 @@ const LiveTrackingScreen = () => {
                   </TouchableOpacity>
                 )}
               </View>
+            </View>
+          )}
+
+          {/* Button xem đường đi tới điểm vừa tìm (nằm ngay phía trên Trạm dừng tiếp theo) */}
+          {searchedPlace && (
+            <View style={styles.searchedRouteBtnRow} pointerEvents="box-none">
+              <TouchableOpacity
+                style={[
+                  styles.searchedRouteBtn,
+                  secondaryRouteCoords.length > 0 && styles.searchedRouteBtnActive,
+                ]}
+                onPress={handleToggleSearchedRoute}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={secondaryRouteCoords.length > 0 ? 'git-branch' : 'git-branch-outline'}
+                  size={15}
+                  color="#FFF"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.searchedRouteBtnText} numberOfLines={1}>
+                  {secondaryRouteCoords.length > 0
+                    ? `Đang xem đường tới: ${searchedPlace.name}`
+                    : `Xem đường đi tới: ${searchedPlace.name}`}
+                </Text>
+                {isCalculatingSecondaryRoute && (
+                  <ActivityIndicator size="small" color="#FFF" style={{ marginLeft: 6 }} />
+                )}
+                <TouchableOpacity
+                  style={styles.searchedRouteCloseBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleClearSearchedPlace();
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={17} color="#FFE0BD" />
+                </TouchableOpacity>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1600,6 +1830,106 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.primary,
+  },
+
+  // ── Panel Tìm kiếm địa điểm nhanh ──
+  searchFloatingPanel: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    maxHeight: 280,
+  },
+  searchBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textPrimary,
+    paddingVertical: 6,
+  },
+  searchBarCloseBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 4,
+  },
+  searchBarCloseText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  searchPredList: {
+    maxHeight: 210,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 4,
+  },
+  searchPredItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#F0EAE4',
+  },
+  searchPredTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 2,
+  },
+  searchPredSub: {
+    fontSize: 11.5,
+    color: colors.textSecondary,
+  },
+
+  // ── Button Xem đường đi tới điểm vừa tìm ──
+  searchedRouteBtnRow: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  searchedRouteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6D3B1C', // Nâu đậm đồng bộ màu tuyến phụ
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    maxWidth: SCREEN_WIDTH * 0.86,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 5,
+    borderWidth: 1.5,
+    borderColor: '#A85A32',
+  },
+  searchedRouteBtnActive: {
+    backgroundColor: '#4E2A15',
+    borderColor: '#CD8554',
+  },
+  searchedRouteBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    flexShrink: 1,
+  },
+  searchedRouteCloseBtn: {
+    marginLeft: 8,
+    padding: 2,
   },
   nextStopPill: {
     flexDirection: 'row',

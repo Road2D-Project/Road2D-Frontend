@@ -31,7 +31,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CreateRouteScreenNavigationProp } from '../../types/navigation';
 import { SharedGoongMap, MapWaypoint } from '../../components/map/SharedGoongMap';
 import {
@@ -352,15 +352,40 @@ const sb = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export const CreateRouteScreen: React.FC = () => {
   const navigation = useNavigation<CreateRouteScreenNavigationProp>();
+  const route = useRoute<any>();
   const webviewRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   const [phase, setPhase] = useState<Phase>(0);
-  const [origin, setOrigin] = useState<Waypoint | null>(null);
-  const [destination, setDestination] = useState<Waypoint | null>(null);
-  const [stops, setStops] = useState<StopWaypoint[]>([]);
+  const [origin, setOrigin] = useState<Waypoint | null>(route.params?.initialOrigin || null);
+  const [destination, setDestination] = useState<Waypoint | null>(route.params?.initialDestination || null);
+  const [stops, setStops] = useState<StopWaypoint[]>(route.params?.initialStops || []);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const mapHeightAnim = useRef(new Animated.Value(NORMAL_MAP_HEIGHT)).current;
+
+  // Lắng nghe dữ liệu ban đầu khi được điều hướng từ chuyến đi cũ
+  useEffect(() => {
+    if (route.params?.initialOrigin) {
+      setOrigin(route.params.initialOrigin);
+    }
+    if (route.params?.initialDestination) {
+      setDestination(route.params.initialDestination);
+    }
+    if (Array.isArray(route.params?.initialStops) && route.params.initialStops.length > 0) {
+      setStops(route.params.initialStops);
+    }
+  }, [route.params]);
+
+  // Đảo chiều điểm đầu - điểm cuối và tự động đảo ngược thứ tự các trạm dừng
+  const handleSwapOriginDestination = () => {
+    if (!origin && !destination) return;
+    const tempOrigin = origin;
+    setOrigin(destination);
+    setDestination(tempOrigin);
+    if (stops.length > 0) {
+      setStops((prev) => [...prev].reverse());
+    }
+  };
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -665,7 +690,19 @@ export const CreateRouteScreen: React.FC = () => {
           }, 100);
         }}
       />
-      <View style={styles.divLine} />
+      {/* Nút Đảo Chiều Lộ Trình (Đổi điểm đầu, điểm cuối và tự đảo các trạm dừng) */}
+      <View style={styles.swapDividerRow}>
+        <View style={styles.swapDividerLine} />
+        <TouchableOpacity
+          style={styles.swapCircleBtn}
+          onPress={handleSwapOriginDestination}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="swap-vertical" size={17} color={C.primary} style={{ marginRight: 4 }} />
+          <Text style={styles.swapBtnText}>Đảo chiều điểm đầu - cuối</Text>
+        </TouchableOpacity>
+        <View style={styles.swapDividerLine} />
+      </View>
       <Text style={styles.panelLabel}>ĐIỂM ĐẾN</Text>
       <SearchBox
         placeholder="Tìm điểm đến..."
@@ -1130,6 +1167,38 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: C.border,
     marginVertical: 10,
+  },
+  swapDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 10,
+    justifyContent: 'center',
+  },
+  swapDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: C.border,
+  },
+  swapCircleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EE',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginHorizontal: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  swapBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.primary,
   },
   hintRow: {
     flexDirection: 'row',

@@ -419,14 +419,14 @@ const HomeScreen = () => {
         </View>
 
         {/* ── CHUYẾN ĐI SẮP TỚI ── */}
-        <View style={[styles.sectionHeader, { marginTop: 4 }]}>
+        <View style={[styles.sectionHeader, { marginTop: 6 }]}>
           <Text style={styles.sectionTitle}>CHUYẾN ĐI SẮP TỚI</Text>
           <TouchableOpacity
-            style={[styles.historyBtn, { paddingTop: 5 }]}
+            style={styles.historyBtn}
             onPress={() => navigation.navigate('TripHistory')}
             activeOpacity={0.7}
           >
-            <Feather name="clock" size={13} color={C.primary} style={{ marginRight: 4 }} />
+            <Feather name="clock" size={13.5} color={C.primary} style={{ marginRight: 5 }} />
             <Text style={styles.seeAll}>Lịch sử ({pastTrips.length})</Text>
           </TouchableOpacity>
         </View>
@@ -902,13 +902,15 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     marginBottom: 16,
+    gap: 8,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: '800',
     color: C.heading,
+    flexShrink: 1,
   },
   seeAll: {
     fontSize: 12.5,
@@ -919,11 +921,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FAF5EE',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: C.borderLight,
+    flexShrink: 0,
+    marginRight: 4,
   },
   homeSearchContainer: {
     flexDirection: 'row',
