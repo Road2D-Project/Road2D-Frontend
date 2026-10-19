@@ -4,8 +4,8 @@
  * USE_MOCK=true  → đọc/ghi `mockDb` trong RAM (mất khi reload app).
  * USE_MOCK=false → gọi API thật. (TODO BACKEND: xác nhận endpoint + shape response)
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from './index';
+import planningService from './planningService';
 import { USE_MOCK } from '../../config/env';
 import { useAuthStore } from '../../store/useAuthStore';
 import { MOCK_CURRENT_USER } from '../../mocks/mockData';
@@ -15,6 +15,19 @@ import type { CreateTripPayload, Trip } from '../../types';
 
 const genInviteCode = () =>
   'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {}
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 const ROUTE_CATALOG_DISTANCES: Record<string, number> = {
   'bến thành': 8.5,
@@ -148,17 +161,7 @@ const tripService = {
             // ignore
           }
 
-          // Kiểm tra cache quãng đường
-          if (t.distanceKm === 0 && t.id) {
-            try {
-              const cached = await AsyncStorage.getItem(`trip_dist_${t.id}`);
-              if (cached) {
-                t.distanceKm = parseFloat(cached);
-              }
-            } catch {
-              // ignore
-            }
-          }
+
         })
       );
 
@@ -178,32 +181,7 @@ const tripService = {
     // GET /v1/trips/:tripId
     const res = await apiClient.get<any>(`/trips/${id}`);
     const trip = mapBackendTripToFrontend(res.data);
-    if (trip.distanceKm === 0 && trip.id) {
-      try {
-        const cached = await AsyncStorage.getItem(`trip_dist_${trip.id}`);
-        if (cached) {
-          trip.distanceKm = parseFloat(cached);
-        }
-      } catch {
-        // ignore
-      }
-    }
-    // Nạp lộ trình thật đã lưu của chuyến đi
-    if (trip.id) {
-      try {
-        const cachedRouteStr = await AsyncStorage.getItem(`trip_route_${trip.id}`);
-        if (cachedRouteStr) {
-          const cachedRoute = JSON.parse(cachedRouteStr);
-          (trip as any).route = cachedRoute;
-          (trip as any).waypoints = cachedRoute.waypoints || [];
-          (trip as any).polylineCoords = cachedRoute.polylineCoords || [];
-          (trip as any).origin = cachedRoute.origin;
-          (trip as any).destination = cachedRoute.destination;
-        }
-      } catch {
-        // ignore
-      }
-    }
+
     try {
       const membersRes = await apiClient.get<any>(`/trips/${id}/members`);
       const membersList = Array.isArray(membersRes.data)
@@ -281,6 +259,7 @@ const tripService = {
     const tierTag = payload.tripType && payload.tripType !== 'bronze' ? ` [tier:${payload.tripType}]` : '';
     const daysTag = payload.durationDays ? ` [days:${payload.durationDays}]` : '';
     const bePayload: any = {
+      idempotencyKey: payload.idempotencyKey || generateUUID(),
       name: payload.name,
       note: ((payload.note || '') + distTag + tierTag + daysTag).trim(),
       // Backend Go chỉ hỗ trợ chính sách giới hạn thành viên cho 'bronze' (15 seats).
@@ -313,11 +292,7 @@ const tripService = {
     }
     if (payload.distanceKm) {
       trip.distanceKm = payload.distanceKm;
-      try {
-        await AsyncStorage.setItem(`trip_dist_${trip.id}`, String(payload.distanceKm));
-      } catch {
-        // ignore
-      }
+
     }
 
     // Lấy invite link token qua POST /v1/trips/:tripId/invite-link
@@ -475,6 +450,185 @@ const tripService = {
       throw err;
     }
   },
+
+  /**
+   * GET /trips/:tripId/draft - Lấy danh sách điểm nháp (inbox) của chuyến đi
+   */
+  getDraftDestinations: async (tripId: string): Promise<{ destinations: any[] }> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return { destinations: [] };
+    }
+    const res = await apiClient.get<{ destinations: any[] }>(`/trips/${tripId}/draft`);
+    return res.data;
+  },
+
+  /**
+   * POST /trips/:tripId/draft - Lưu destination vào draft inbox của chuyến đi
+   */
+  addDraftDestination: async (tripId: string, destinationId: string): Promise<any> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return { success: true, destinationId };
+    }
+    const res = await apiClient.post(`/trips/${tripId}/draft`, { destinationId });
+    return res.data;
+  },
+
+  /**
+   * Lưu một địa điểm mới tìm kiếm (từ Goong place_id) vào draft của chuyến đi.
+   * Quy trình 3 bước chuẩn backend:
+   * 1. POST /planning/location { placeId } -> locationId
+   * 2. POST /planning/fork/{locationId} { name, stayOverTime: 0 } -> destinationId
+   * 3. POST /trips/{tripId}/draft { destinationId } -> lưu vào draft branch
+   */
+  saveDiscoveredPlaceToDraft: async (
+    tripId: string,
+    placeId: string,
+    placeName: string
+  ): Promise<any> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return { success: true, placeId, placeName };
+    }
+    try {
+      // 1. Resolve placeId -> catalog locationId
+      const loc = await planningService.ensureLocation(placeId);
+      // 2. Fork location -> destination pin
+      const dest = await planningService.forkLocation(loc.locationId, {
+        name: placeName || loc.name,
+        stayOverTime: 0,
+      });
+      // 3. Park pin on trip's draft branch
+      return await tripService.addDraftDestination(tripId, dest.destinationId);
+    } catch (err: any) {
+      console.warn('[tripService] saveDiscoveredPlaceToDraft error:', err?.response?.data || err?.message || err);
+      throw err;
+    }
+  },
+
+  /**
+   * GET /trips/:tripId/graph - Lấy đồ thị đa nhánh đầy đủ của chuyến đi kèm trạm dừng & polyline
+   */
+  getTripGraph: async (tripId: string): Promise<TripDetailResponse | null> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return null;
+    }
+    try {
+      const res = await apiClient.get<TripDetailResponse>(`/trips/${tripId}/graph`);
+      return res.data;
+    } catch (err: any) {
+      console.warn('[tripService] getTripGraph error:', err?.response?.data || err?.message || err);
+      return null;
+    }
+  },
+
+  /**
+   * PUT /trips/:tripId/graph - Cập nhật đồ thị các nhánh (branches) của chuyến đi
+   * branches[0] là nhánh chính. Mỗi nhánh phụ tiếp theo bắt đầu bằng split destination ID và kết thúc bằng merge destination ID.
+   * openTail[i] = true nếu nhánh i kết thúc tự do (không nhập lại đường chính).
+   */
+  setTripGraph: async (
+    tripId: string,
+    branches: string[][],
+    openTail: boolean[]
+  ): Promise<TripDetailResponse> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return { id: tripId, branches: [] } as any;
+    }
+    const res = await apiClient.put<TripDetailResponse>(`/trips/${tripId}/graph`, {
+      branches,
+      openTail,
+    });
+    return res.data;
+  },
+
+  /**
+   * POST /trips/:tripId/travels - Tính toán tuyến đường (polyline, distance, duration) cho các nhánh đã lưu
+   */
+  computeStoredTravels: async (tripId: string): Promise<any> => {
+    if (USE_MOCK) {
+      await delay(300);
+      return { branches: [] };
+    }
+    const res = await apiClient.post(`/trips/${tripId}/travels`);
+    return res.data;
+  },
+
+  /**
+   * PUT /trips/:tripId/assign - Phân công thành viên vào nhánh hành trình cụ thể
+   */
+  assignMemberToBranch: async (
+    tripId: string,
+    userId: string,
+    branchId: string
+  ): Promise<void> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return;
+    }
+    await apiClient.put(`/trips/${tripId}/assign`, {
+      userId,
+      branchId,
+    });
+  },
+
+  /**
+   * PATCH /trips/:tripId/branches/:branchId - Cập nhật tên, mục đích và mã màu hex cho nhánh
+   */
+  updateBranchMetadata: async (
+    tripId: string,
+    branchId: string,
+    data: { label?: string; description?: string; color?: string }
+  ): Promise<any> => {
+    if (USE_MOCK) {
+      await delay(200);
+      return data;
+    }
+    const res = await apiClient.patch(`/trips/${tripId}/branches/${branchId}`, data);
+    return res.data;
+  },
 };
 
+export interface BackendStopResponse {
+  destinationId: string;
+  name: string;
+  lat: number;
+  lng: number;
+  stayOverTime: number;
+  orderInBranch: number;
+}
+
+export interface BackendTravelResponse {
+  id: string;
+  fromDestinationId: string;
+  toDestinationId: string;
+  vehicle: string;
+  polyline: string;
+  distanceM: number;
+  durationS: number;
+}
+
+export interface BackendBranchResponse {
+  id: string;
+  label: string;
+  description?: string;
+  color?: string;
+  splitFromDestinationId?: string;
+  mergeToDestinationId?: string;
+  stops: BackendStopResponse[];
+  travels?: BackendTravelResponse[];
+}
+
+export interface TripDetailResponse {
+  id: string;
+  name: string;
+  status: string;
+  branches: BackendBranchResponse[];
+  [key: string]: any;
+}
+
 export default tripService;
+

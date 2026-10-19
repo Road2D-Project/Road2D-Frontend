@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StatusBar,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -21,24 +22,52 @@ type ConversationRouteProp = RouteProp<RootStackParamList, 'Conversation'>;
 
 interface Message {
   id: string;
-  text: string;
+  text?: string;
   sender: 'me' | 'them';
+  senderName?: string;
   time: string;
   type?: 'text' | 'location' | 'image';
+  imageUrl?: string;
 }
 
 // ─── Mock conversation data ────────────────────────────────────────────────────
 
 const MOCK_CONVERSATIONS: Record<string, Message[]> = {
   '1': [
-    { id: 'm1', sender: 'them', text: 'Mọi người chuẩn bị áo ấm nhé! Sáng mai tập kết lúc 5h tại ngã tư Kim Mã.', time: '10:30', type: 'text' },
+    { id: 'm1', sender: 'them', senderName: 'Tuấn Đạt', text: 'Mọi người chuẩn bị áo ấm nhé! Sáng mai tập kết lúc 5h tại ngã tư Kim Mã.', time: '10:30', type: 'text' },
     { id: 'm2', sender: 'me', text: 'OK anh! Em mang thêm bạt dã ngoại được không?', time: '10:32', type: 'text' },
-    { id: 'm3', sender: 'them', text: 'Được chứ, đỉnh núi gió lạnh lắm, có thêm bạt tốt hơn!', time: '10:33', type: 'text' },
-    { id: 'm4', sender: 'them', text: '📍 Điểm tập kết: Ngã tư Kim Mã - Liễu Giai', time: '10:34', type: 'location' },
+    { id: 'm3', sender: 'them', senderName: 'Tuấn Đạt', text: 'Được chứ, đỉnh núi gió lạnh lắm, có thêm bạt tốt hơn!', time: '10:33', type: 'text' },
+    { id: 'm4', sender: 'them', senderName: 'Tuấn Đạt', text: '📍 Điểm tập kết: Ngã tư Kim Mã - Liễu Giai', time: '10:34', type: 'location' },
     { id: 'm5', sender: 'me', text: 'Dạ, em đã đánh dấu rồi. Ai còn thiếu đồ camping thì ib em, em có thể cho mượn thêm 1 túi ngủ.', time: '10:38', type: 'text' },
-    { id: 'm6', sender: 'them', text: 'Mọi người check lốp xe trước nhé! Cung Tà Xùa nhiều đoạn đường xấu.', time: '10:40', type: 'text' },
-    { id: 'm7', sender: 'me', text: 'Vâng anh! Em hỏi thêm 1 chút: mình có dự phòng trạm sửa xe dọc đường không ạ?', time: '10:41', type: 'text' },
-    { id: 'm8', sender: 'them', text: 'Có 1 chỗ ở Nghĩa Lộ, sau đó đến Mù Cang Chải thì có thêm 1 chỗ nữa. Nhưng đoạn cuối lên Tà Xùa thì không có, nên mang theo bơm tay và vá xe dự phòng nha!', time: '10:42', type: 'text' },
+    {
+      id: 'm-img1',
+      sender: 'them',
+      senderName: 'Tuấn Đạt',
+      text: 'Đoàn tiền trạm vừa gửi hình đèo Tà Xùa sớm nay nè anh em! Biển mây cuồn cuộn dâng tới đỉnh rồi, cực đẹp luôn!',
+      time: '10:41',
+      type: 'image',
+      imageUrl: 'https://images.unsplash.com/photo-1596704153831-fbf22d4f58c7?q=80&w=800',
+    },
+    { id: 'm6', sender: 'them', senderName: 'Linh Hà', text: 'Mọi người check lốp xe trước nhé! Cung Tà Xùa nhiều đoạn đường xấu và dốc gắt.', time: '10:42', type: 'text' },
+    {
+      id: 'm-img2',
+      sender: 'them',
+      senderName: 'Linh Hà',
+      text: 'Bãi cắm trại Đỉnh Gió đã dựng lều xong xuôi rồi nhé mọi người, view thẳng xuống thung lũng mây!',
+      time: '10:44',
+      type: 'image',
+      imageUrl: 'https://images.unsplash.com/photo-1510312305653-8ed496efae75?q=80&w=800',
+    },
+    { id: 'm7', sender: 'me', text: 'Vâng anh! Em hỏi thêm 1 chút: mình có dự phòng trạm sửa xe dọc đường không ạ?', time: '10:45', type: 'text' },
+    { id: 'm8', sender: 'them', senderName: 'Tuấn Đạt', text: 'Có 1 chỗ ở Nghĩa Lộ, sau đó đến Mù Cang Chải thì có thêm 1 chỗ nữa. Nhưng đoạn cuối lên Tà Xùa thì không có, nên mang theo bơm tay và vá xe dự phòng nha!', time: '10:46', type: 'text' },
+    {
+      id: 'm-img3',
+      sender: 'me',
+      text: 'Dạ anh yên tâm, xe em đã thay nhớt, căng xích và chằng đồ đạc gọn gàng sẵn sàng xuất phát rồi!',
+      time: '10:48',
+      type: 'image',
+      imageUrl: 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?q=80&w=800',
+    },
   ],
   '2': [
     { id: 'm1', sender: 'them', text: 'Chào mọi người! Ai muốn ghép cung Hà Giang tháng 11 không?', time: 'Hôm qua', type: 'text' },
@@ -70,6 +99,7 @@ const ConversationScreen = () => {
     MOCK_CONVERSATIONS[chatId] ?? []
   );
   const [inputText, setInputText] = useState('');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const themAvatar = THEM_AVATARS[chatId] ?? AVATAR_THEM_1;
 
   const sendMessage = () => {
@@ -87,9 +117,38 @@ const ConversationScreen = () => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
+  const handleQuickSendImage = () => {
+    const sampleImages = [
+      {
+        url: 'https://images.unsplash.com/photo-1568853118939-f9f257ceeeeb?q=80&w=800',
+        caption: 'Gửi anh em tấm hình sương mù trên đèo lúc nãy nè!',
+      },
+      {
+        url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?q=80&w=800',
+        caption: 'Đoàn mình vừa ghé trạm dừng chân, cảnh đẹp mê ly!',
+      },
+      {
+        url: 'https://images.unsplash.com/photo-1599423423926-17b5db30303a?q=80&w=800',
+        caption: 'Check-in khúc cua tay áo, đường êm ru!',
+      },
+    ];
+    const picked = sampleImages[Math.floor(Math.random() * sampleImages.length)];
+    const msg: Message = {
+      id: Date.now().toString(),
+      sender: 'me',
+      text: picked.caption,
+      time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      type: 'image',
+      imageUrl: picked.url,
+    };
+    setMessages((prev) => [...prev, msg]);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
+  };
+
   const renderMessage = (msg: Message) => {
     const isMe = msg.sender === 'me';
     const isLocation = msg.type === 'location';
+    const isImage = msg.type === 'image';
 
     return (
       <View
@@ -100,10 +159,32 @@ const ConversationScreen = () => {
           <Image source={{ uri: themAvatar }} style={styles.msgAvatar} />
         )}
         <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem, isLocation && styles.bubbleLocation]}>
+          {!isMe && msg.senderName && (
+            <Text style={styles.senderNameLabel}>{msg.senderName}</Text>
+          )}
+
           {isLocation ? (
             <View style={styles.locationBubble}>
               <Ionicons name="location" size={16} color={colors.primary} />
-              <Text style={styles.locationBubbleText}>{msg.text.replace('📍 ', '')}</Text>
+              <Text style={styles.locationBubbleText}>{msg.text?.replace('📍 ', '')}</Text>
+            </View>
+          ) : isImage && msg.imageUrl ? (
+            <View style={styles.imageMessageWrap}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => setPreviewImage(msg.imageUrl || null)}
+              >
+                <Image
+                  source={{ uri: msg.imageUrl }}
+                  style={styles.chatImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+              {msg.text ? (
+                <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe, { marginTop: 6 }]}>
+                  {msg.text}
+                </Text>
+              ) : null}
             </View>
           ) : (
             <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{msg.text}</Text>
@@ -163,13 +244,13 @@ const ConversationScreen = () => {
             <Ionicons name="stats-chart-outline" size={18} color={colors.primary} />
             <Text style={styles.quickBtnText}>Tạo bình chọn</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.quickBtn}>
+          <TouchableOpacity style={styles.quickBtn} onPress={handleQuickSendImage}>
             <Ionicons name="image-outline" size={18} color={colors.primary} />
             <Text style={styles.quickBtnText}>Gửi ảnh</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Input */}
+        {/* Input - Nâng padding lề dưới tránh bị sát cạnh điện thoại */}
         <View style={styles.inputRow}>
           <TextInput
             style={styles.textInput}
@@ -189,6 +270,18 @@ const ConversationScreen = () => {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Modal xem ảnh phóng to */}
+      <Modal visible={!!previewImage} transparent animationType="fade" onRequestClose={() => setPreviewImage(null)}>
+        <View style={styles.modalBackdrop}>
+          <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setPreviewImage(null)}>
+            <Ionicons name="close" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          {previewImage && (
+            <Image source={{ uri: previewImage }} style={styles.modalFullImage} resizeMode="contain" />
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -254,6 +347,21 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     borderWidth: 1,
   },
+  senderNameLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  imageMessageWrap: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  chatImage: {
+    width: 220,
+    height: 150,
+    borderRadius: 12,
+  },
   locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   locationBubbleText: { fontSize: 13, fontWeight: '600', color: colors.primary },
   bubbleText: { fontSize: 14, color: colors.textPrimary, lineHeight: 20 },
@@ -284,11 +392,13 @@ const styles = StyleSheet.create({
   },
   quickBtnText: { fontSize: 11, fontWeight: '600', color: colors.primary },
 
+  // Nâng lề dưới (paddingBottom) lên để không bị sát lề dưới màn hình điện thoại
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 22,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -315,6 +425,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendBtnDisabled: { opacity: 0.4 },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseBtn: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 25,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalFullImage: {
+    width: '94%',
+    height: '80%',
+  },
 });
 
 export default ConversationScreen;

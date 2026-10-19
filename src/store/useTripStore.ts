@@ -1,20 +1,16 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import tripService from '../services/api/tripService';
 import { registerOnForceLogout } from '../services/api';
 import type { CreateTripPayload, Trip } from '../types';
-
-const STORAGE_ACTIVE_TRIP_KEY = '@road2d_active_trip_id';
-const STORAGE_COMPLETED_TRIPS_KEY = '@road2d_completed_trip_ids';
 
 export interface TripState {
   trips: Trip[];
   loading: boolean;
   hasFetched: boolean;
   error: string | null;
-  /** ID trip đang diễn ra (ACTIVE) lưu trong Local Storage */
+  /** ID trip đang diễn ra (ACTIVE / STAY) lấy trực tiếp từ Backend */
   activeTripId: string | null;
-  /** Danh sách ID các trip đã hoàn thành (COMPLETED) lưu trong Local Storage */
+  /** Danh sách ID các trip đã hoàn thành (COMPLETED) lấy trực tiếp từ Backend */
   completedTripIds: string[];
   /** Trip vừa tạo / đang xem (dùng truyền sang TeamRoster, LiveTracking) */
   currentTripId: string | null;
@@ -37,6 +33,62 @@ export interface TripState {
   reset: () => void;
 }
 
+/**
+ * Chuẩn hoá trạng thái từ backend về format đồng bộ:
+ * - ACTIVE: chuyến đang diễn ra (hoặc stay)
+ * - PLANNING: chuyến đi sắp tới (hoặc locked)
+ * - COMPLETED: chuyến đã đi / hoàn thành
+ */
+function normalizeTripStatus(rawStatus?: string): Trip['status'] {
+  const s = (rawStatus || 'PLANNING').toString().toUpperCase();
+  if (s === 'ACTIVE' || s === 'STAY') return 'ACTIVE';
+  if (s === 'COMPLETED') return 'COMPLETED';
+  if (s === 'LOCKED') return 'LOCKED';
+  if (s === 'CANCELLED') return 'CANCELLED';
+  return 'PLANNING';
+}
+
+/**
+ * Sắp xếp danh sách trip:
+ * 1. Các chuyến có tag ACTIVE / STAY đẩy lên đầu trang chủ
+ * 2. Các chuyến PLANNING / LOCKED (chuyến đi sắp tới)
+ * 3. Các chuyến COMPLETED (chuyến đã đi)
+ */
+function sortTrips(trips: Trip[]): Trip[] {
+  return [...trips].sort((a, b) => {
+    const getPriority = (status?: string) => {
+      const s = normalizeTripStatus(status);
+      if (s === 'ACTIVE') return 1;
+      if (s === 'PLANNING' || s === 'LOCKED') return 2;
+      if (s === 'COMPLETED') return 3;
+      return 4;
+    };
+
+    const pA = getPriority(a.status);
+    const pB = getPriority(b.status);
+
+    if (pA !== pB) {
+      return pA - pB;
+    }
+
+    // Nếu cùng là chuyến sắp tới (PLANNING): sắp theo ngày khởi hành gần nhất
+    if (pA === 2) {
+      const timeA = a.startAt ? new Date(a.startAt).getTime() : Infinity;
+      const timeB = b.startAt ? new Date(b.startAt).getTime() : Infinity;
+      return timeA - timeB;
+    }
+
+    // Nếu cùng là chuyến đã đi (COMPLETED): sắp theo chuyến mới nhất
+    if (pA === 3) {
+      const timeA = a.startAt ? new Date(a.startAt).getTime() : 0;
+      const timeB = b.startAt ? new Date(b.startAt).getTime() : 0;
+      return timeB - timeA;
+    }
+
+    return 0;
+  });
+}
+
 export const useTripStore = create<TripState>()((set, get) => ({
   trips: [],
   loading: true,
@@ -50,71 +102,28 @@ export const useTripStore = create<TripState>()((set, get) => ({
   fetchTrips: async () => {
     set({ loading: true, error: null });
     try {
-      // 1. Tải trạng thái active & completed từ AsyncStorage
-      let storedActiveId: string | null = null;
-      let storedCompletedIds: string[] = [];
-      try {
-        storedActiveId = await AsyncStorage.getItem(STORAGE_ACTIVE_TRIP_KEY);
-        const compRaw = await AsyncStorage.getItem(STORAGE_COMPLETED_TRIPS_KEY);
-        if (compRaw) {
-          storedCompletedIds = JSON.parse(compRaw);
-        }
-      } catch (storageErr) {
-        console.warn('Lỗi đọc local storage trip status:', storageErr);
-      }
-
-      // 2. Tải danh sách trip từ Backend
+      // 1. Chỉ fetch trạng thái từ Backend, CẤM lưu/đọc Local Storage
       const rawTrips = await tripService.getTrips();
-      const now = Date.now();
 
-      // 3. Ánh xạ trạng thái dựa trên Local Storage & thời gian khởi hành tự động
-      let resolvedActiveId = storedActiveId;
+      // 2. Chuẩn hoá trạng thái từ Backend
+      const mappedTrips: Trip[] = (rawTrips || []).map((t) => ({
+        ...t,
+        status: normalizeTripStatus(t.status),
+      }));
 
-      const mappedTrips = rawTrips.map((t) => {
-        // Nếu Backend đã có status COMPLETED hoặc Local Storage đã lưu completed
-        if (t.status === 'COMPLETED' || (t.status as string) === 'completed' || storedCompletedIds.includes(t.id)) {
-          if (!storedCompletedIds.includes(t.id)) {
-            storedCompletedIds.push(t.id);
-          }
-          return { ...t, status: 'COMPLETED' as const };
-        }
+      // 3. Sắp xếp: ACTIVE lên đầu, PLANNING ở giữa, COMPLETED ở cuối
+      const sorted = sortTrips(mappedTrips);
 
-        // Nếu Backend đã có status ACTIVE hoặc STAY
-        if (t.status === 'ACTIVE' || (t.status as string) === 'active' || t.status === 'STAY' || (t.status as string) === 'stay') {
-          if (!resolvedActiveId) {
-            resolvedActiveId = t.id;
-          }
-          return { ...t, status: 'ACTIVE' as const };
-        }
-
-        // Nếu đang active từ trước trong Local Storage
-        if (resolvedActiveId === t.id) {
-          return { ...t, status: 'ACTIVE' as const };
-        }
-
-        // Tự động kích hoạt khi đến giờ khởi hành (startAt <= now) nếu chưa có trip active khác
-        const startTimestamp = t.startAt ? new Date(t.startAt).getTime() : NaN;
-        if (!isNaN(startTimestamp) && startTimestamp <= now) {
-          if (!resolvedActiveId) {
-            resolvedActiveId = t.id;
-          }
-          if (resolvedActiveId === t.id) {
-            return { ...t, status: 'ACTIVE' as const };
-          }
-        }
-
-        return t;
-      });
-
-      // Lưu lại activeTripId nếu có trip tự động kích hoạt
-      if (resolvedActiveId && resolvedActiveId !== storedActiveId) {
-        AsyncStorage.setItem(STORAGE_ACTIVE_TRIP_KEY, resolvedActiveId).catch(() => {});
-      }
+      const activeTrip = sorted.find((t) => normalizeTripStatus(t.status) === 'ACTIVE');
+      const activeTripId = activeTrip ? activeTrip.id : null;
+      const completedTripIds = sorted
+        .filter((t) => normalizeTripStatus(t.status) === 'COMPLETED')
+        .map((t) => t.id);
 
       set({
-        trips: mappedTrips,
-        activeTripId: resolvedActiveId,
-        completedTripIds: storedCompletedIds,
+        trips: sorted,
+        activeTripId,
+        completedTripIds,
         loading: false,
         hasFetched: true,
       });
@@ -131,23 +140,30 @@ export const useTripStore = create<TripState>()((set, get) => ({
     try {
       const trip = await tripService.getTripById(id);
       if (trip) {
-        const { activeTripId, completedTripIds } = get();
-        let resolvedStatus = trip.status;
-        if (completedTripIds.includes(trip.id)) {
-          resolvedStatus = 'COMPLETED';
-        } else if (activeTripId === trip.id) {
-          resolvedStatus = 'ACTIVE';
-        } else if (trip.startAt && new Date(trip.startAt).getTime() <= Date.now()) {
-          resolvedStatus = 'ACTIVE';
-        }
-        const updatedTrip = { ...trip, status: resolvedStatus };
+        const normalizedTrip: Trip = {
+          ...trip,
+          status: normalizeTripStatus(trip.status),
+        };
 
-        set((s) => ({
-          trips: s.trips.some((t) => t.id === id)
-            ? s.trips.map((t) => (t.id === id ? updatedTrip : t))
-            : [updatedTrip, ...s.trips],
-        }));
-        return updatedTrip;
+        set((s) => {
+          const exists = s.trips.some((t) => t.id === id);
+          const newTrips = exists
+            ? s.trips.map((t) => (t.id === id ? normalizedTrip : t))
+            : [normalizedTrip, ...s.trips];
+
+          const sorted = sortTrips(newTrips);
+          const activeTrip = sorted.find((t) => normalizeTripStatus(t.status) === 'ACTIVE');
+
+          return {
+            trips: sorted,
+            activeTripId: activeTrip ? activeTrip.id : null,
+            completedTripIds: sorted
+              .filter((t) => normalizeTripStatus(t.status) === 'COMPLETED')
+              .map((t) => t.id),
+          };
+        });
+
+        return normalizedTrip;
       }
       return trip;
     } catch {
@@ -157,38 +173,47 @@ export const useTripStore = create<TripState>()((set, get) => ({
 
   createTrip: async (payload) => {
     const trip = await tripService.createTrip(payload);
-    set((s) => ({ trips: [trip, ...s.trips], currentTripId: trip.id, draft: {} }));
+    const normalizedTrip: Trip = {
+      ...trip,
+      status: normalizeTripStatus(trip.status),
+    };
+    set((s) => {
+      const sorted = sortTrips([normalizedTrip, ...s.trips]);
+      return {
+        trips: sorted,
+        currentTripId: trip.id,
+        draft: {},
+      };
+    });
     return trip;
   },
 
   leaveTrip: async (id: string) => {
     await tripService.leaveTrip(id);
-    const { activeTripId, completedTripIds } = get();
-    if (activeTripId === id) {
-      await AsyncStorage.removeItem(STORAGE_ACTIVE_TRIP_KEY);
-    }
-    set((s) => ({
-      trips: s.trips.filter((t) => t.id !== id),
-      currentTripId: s.currentTripId === id ? null : s.currentTripId,
-      activeTripId: s.activeTripId === id ? null : s.activeTripId,
-      completedTripIds: completedTripIds.filter((cid) => cid !== id),
-    }));
+    set((s) => {
+      const remaining = s.trips.filter((t) => t.id !== id);
+      const activeTrip = remaining.find((t) => normalizeTripStatus(t.status) === 'ACTIVE');
+      return {
+        trips: remaining,
+        currentTripId: s.currentTripId === id ? null : s.currentTripId,
+        activeTripId: activeTrip ? activeTrip.id : null,
+        completedTripIds: s.completedTripIds.filter((cid) => cid !== id),
+      };
+    });
   },
 
   deleteTrip: async (id: string) => {
     await tripService.deleteTrip(id);
-    const { activeTripId, completedTripIds } = get();
-    if (activeTripId === id) {
-      await AsyncStorage.removeItem(STORAGE_ACTIVE_TRIP_KEY);
-    }
-    const newComp = completedTripIds.filter((cid) => cid !== id);
-    await AsyncStorage.setItem(STORAGE_COMPLETED_TRIPS_KEY, JSON.stringify(newComp));
-    set((s) => ({
-      trips: s.trips.filter((t) => t.id !== id),
-      currentTripId: s.currentTripId === id ? null : s.currentTripId,
-      activeTripId: s.activeTripId === id ? null : s.activeTripId,
-      completedTripIds: newComp,
-    }));
+    set((s) => {
+      const remaining = s.trips.filter((t) => t.id !== id);
+      const activeTrip = remaining.find((t) => normalizeTripStatus(t.status) === 'ACTIVE');
+      return {
+        trips: remaining,
+        currentTripId: s.currentTripId === id ? null : s.currentTripId,
+        activeTripId: activeTrip ? activeTrip.id : null,
+        completedTripIds: s.completedTripIds.filter((cid) => cid !== id),
+      };
+    });
   },
 
   setCurrentTrip: (id) => set({ currentTripId: id }),
@@ -196,70 +221,72 @@ export const useTripStore = create<TripState>()((set, get) => ({
   clearDraft: () => set({ draft: {} }),
 
   startTrip: async (id: string) => {
-    try {
-      // 1. Gọi API Backend để kích hoạt chuyến đi thật (Leader: PATCH /v1/trips/:id/active)
-      await tripService.startTrip(id);
-    } catch (apiErr) {
-      console.warn('[useTripStore] startTrip API error, proceeding with local sync:', apiErr);
-      // Ném lỗi để caller (TripDetailsScreen) biết nếu có lỗi phân quyền
-      throw apiErr;
+    // Ràng buộc quy định: Mỗi thời điểm chỉ được phép CÓ DUY NHẤT 1 chuyến đi đang hoạt động
+    const currentTrips = get().trips;
+    const existingActive = currentTrips.find(
+      (t) => (normalizeTripStatus(t.status) === 'ACTIVE' || normalizeTripStatus(t.status) === 'STAY') && t.id !== id
+    );
+    if (existingActive) {
+      throw new Error(
+        `Bạn đang có chuyến đi "${existingActive.name}" đang diễn ra. Mỗi thời điểm chỉ được phép có 1 chuyến đi hoạt động. Vui lòng hoàn thành chuyến đi đó trước khi bắt đầu chuyến mới!`
+      );
     }
 
-    try {
-      // 2. Đồng bộ Local Storage & Zustand Store
-      await AsyncStorage.setItem(STORAGE_ACTIVE_TRIP_KEY, id);
-      const newCompleted = get().completedTripIds.filter((cid) => cid !== id);
-      await AsyncStorage.setItem(STORAGE_COMPLETED_TRIPS_KEY, JSON.stringify(newCompleted));
-      set((s) => ({
+    // Gọi API Backend để bắt đầu chuyến đi
+    await tripService.startTrip(id);
+
+    // Cập nhật in-memory state ngay lập tức, hoàn toàn không lưu AsyncStorage
+    set((s) => {
+      const updated = s.trips.map((t) =>
+        t.id === id ? { ...t, status: 'ACTIVE' as const } : t
+      );
+      const sorted = sortTrips(updated);
+      return {
+        trips: sorted,
         activeTripId: id,
-        completedTripIds: newCompleted,
-        trips: s.trips.map((t) => (t.id === id ? { ...t, status: 'ACTIVE' } : t)),
-      }));
-    } catch (storageErr) {
-      console.warn('Lỗi lưu startTrip vào local storage:', storageErr);
-    }
+        completedTripIds: s.completedTripIds.filter((cid) => cid !== id),
+      };
+    });
   },
 
   completeTrip: async (id: string) => {
+    // Gọi API Backend để hoàn tất chuyến đi
     try {
-      // 1. Gọi API Backend để hoàn tất chuyến đi thật (Leader: POST /v1/trips/:id/complete)
       await tripService.completeTrip(id);
     } catch (apiErr) {
-      console.warn('[useTripStore] completeTrip API error, proceeding with local sync:', apiErr);
+      console.warn('[useTripStore] completeTrip API error:', apiErr);
     }
 
-    try {
-      // 2. Đồng bộ Local Storage & Zustand Store
-      const prevActive = get().activeTripId;
-      if (prevActive === id) {
-        await AsyncStorage.removeItem(STORAGE_ACTIVE_TRIP_KEY);
-      }
-      const newCompleted = Array.from(new Set([...get().completedTripIds, id]));
-      await AsyncStorage.setItem(STORAGE_COMPLETED_TRIPS_KEY, JSON.stringify(newCompleted));
-      set((s) => ({
-        activeTripId: prevActive === id ? null : prevActive,
-        completedTripIds: newCompleted,
-        trips: s.trips.map((t) => (t.id === id ? { ...t, status: 'COMPLETED' } : t)),
-      }));
-    } catch (storageErr) {
-      console.warn('Lỗi lưu completeTrip vào local storage:', storageErr);
-    }
+    // Cập nhật in-memory state ngay lập tức, hoàn toàn không lưu AsyncStorage
+    set((s) => {
+      const updated = s.trips.map((t) =>
+        t.id === id ? { ...t, status: 'COMPLETED' as const } : t
+      );
+      const sorted = sortTrips(updated);
+      const activeTrip = sorted.find((t) => normalizeTripStatus(t.status) === 'ACTIVE');
+      return {
+        trips: sorted,
+        activeTripId: activeTrip ? activeTrip.id : null,
+        completedTripIds: Array.from(new Set([...s.completedTripIds, id])),
+      };
+    });
   },
 
   stopTripMidway: async (id: string) => {
-    // Dừng giữa chừng cũng chuyển trạng thái sang COMPLETED và đưa vào danh sách trip đã đi
     await get().completeTrip(id);
   },
 
   updateTripStatus: async (id: string, status: Trip['status']) => {
-    if (status === 'ACTIVE') {
+    const norm = normalizeTripStatus(status);
+    if (norm === 'ACTIVE') {
       await get().startTrip(id);
-    } else if (status === 'COMPLETED') {
+    } else if (norm === 'COMPLETED') {
       await get().completeTrip(id);
     } else {
-      set((s) => ({
-        trips: s.trips.map((t) => (t.id === id ? { ...t, status } : t)),
-      }));
+      set((s) => {
+        const updated = s.trips.map((t) => (t.id === id ? { ...t, status: norm } : t));
+        return { trips: sortTrips(updated) };
+      });
     }
   },
 
@@ -294,23 +321,20 @@ registerOnForceLogout(() => useTripStore.getState().reset());
 
 /** Selector tiện dụng */
 export const selectUpcomingTrips = (s: TripState) =>
-  s.trips.filter(
-    (t) =>
-      t.status !== 'COMPLETED' &&
-      !s.completedTripIds.includes(t.id) &&
-      t.id !== s.activeTripId &&
-      t.status !== 'ACTIVE'
-  );
+  s.trips.filter((t) => {
+    const st = normalizeTripStatus(t.status);
+    return st === 'PLANNING' || st === 'LOCKED';
+  });
 
 export const selectActiveTrip = (s: TripState) =>
-  s.trips.find(
-    (t) =>
-      (t.id === s.activeTripId || t.status === 'ACTIVE' || (t.status as string) === 'active') &&
-      !s.completedTripIds.includes(t.id) &&
-      t.status !== 'COMPLETED'
-  );
+  s.trips.find((t) => {
+    const st = normalizeTripStatus(t.status);
+    return st === 'ACTIVE';
+  });
 
 export const selectPastTrips = (s: TripState) =>
-  s.trips.filter(
-    (t) => t.status === 'COMPLETED' || s.completedTripIds.includes(t.id)
-  );
+  s.trips.filter((t) => {
+    const st = normalizeTripStatus(t.status);
+    return st === 'COMPLETED';
+  });
+

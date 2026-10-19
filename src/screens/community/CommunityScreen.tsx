@@ -69,9 +69,24 @@ const MOCK_COMMENTS: Record<string, Comment[]> = {
   '2': [
     { id: 'c4', author: 'Minh Xế', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=80', text: 'Đèo này mùa này đẹp lắm! Review thêm về đường xá đi chị.', time: '3 giờ trước' },
     { id: 'c5', author: 'Hải Nam', avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=80', text: 'Bảo Lộc ngon, lần trước mình cũng đi cung này!', time: '2 giờ trước' },
+    { id: 'c6', author: 'Lan Phương', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=80', text: 'Quán cà phê view đồi thông đó tên gì vậy bạn?', time: '1 giờ trước' },
   ],
   '3': [
-    { id: 'c6', author: 'Tuấn Đạt', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=80', text: 'Loop đẹp nhất VN luôn! Lần này đi mấy ngày vậy bạn?', time: '30 phút trước' },
+    { id: 'c7', author: 'Tuấn Đạt', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?q=80&w=80', text: 'Loop đẹp nhất VN luôn! Lần này đi mấy ngày vậy bạn?', time: '30 phút trước' },
+    { id: 'c8', author: 'Khánh Vy', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=80', text: 'Mã Pí Lèng hùng vĩ thật sự, ngắm sông Nho Quế từ trên cao không thể nào quên.', time: '15 phút trước' },
+  ],
+  '4': [
+    { id: 'c9', author: 'Trần Long', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=80', text: 'Ruộng bậc thang Mù Cang Chải tháng 9-10 vàng rực, chụp góc nào cũng như tranh vẽ!', time: '2 giờ trước' },
+    { id: 'c10', author: 'Thảo My', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=80', text: 'Đèo Khau Phạ mùa này có dù lượn không anh?', time: '1 giờ trước' },
+  ],
+  '5': [
+    { id: 'c11', author: 'Việt Anh', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=80', text: 'Hải Vân Quan mới phục dựng xong nhìn cổ kính và đẹp ghê, cung ven biển này đi xe côn tay cực phê!', time: '4 giờ trước' },
+  ],
+  '6': [
+    { id: 'c12', author: 'Đức Huy', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=80', text: 'Cung Bàu Trắng hai bên là đồi cát trắng và hồ sen, chạy xe mát rượi, sống ảo hết nấc!', time: '5 giờ trước' },
+  ],
+  '7': [
+    { id: 'c13', author: 'Ngọc Hân', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=80', text: 'Cổng trời Ô Quy Hồ ngắm hoàng hôn đỏ rực thì đỉnh nhất Tây Bắc rồi!', time: '6 giờ trước' },
   ],
 };
 
@@ -100,13 +115,14 @@ const MOMENTS: MomentPost[] = [
     author: 'Thu Hà',
     avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=80',
     time: '5 giờ trước',
-    caption: 'Đèo Bảo Lộc buổi sáng sương mù giăng kín, đi mà cứ tưởng mình ở đâu đó ở Châu Âu vậy. Cà phê ven đường thơm không đâu bằng!',
+    caption: 'Đèo Bảo Lộc buổi sáng sương mù giăng kín, đi mà cứ tưởng mình ở đâu đó ở Châu Âu vậy. Cà phê ven đường thơm không đâu bằng, view đồi chè xanh mướt mát mắt!',
     location: 'Đèo Bảo Lộc, Lâm Đồng',
     route: 'Sài Gòn → Bảo Lộc → Đà Lạt',
     distance: '180 km',
     duration: '1 ngày',
     images: [
       'https://images.unsplash.com/photo-1568853118939-f9f257ceeeeb?q=80&w=600',
+      'https://images.unsplash.com/photo-1519098901909-b1553a1190af?q=80&w=600',
     ],
     likes: 45,
     rating: 4.5,
@@ -132,12 +148,91 @@ const MOMENTS: MomentPost[] = [
     ratingCount: 89,
     comments: MOCK_COMMENTS['3'],
   },
+  {
+    id: '4',
+    author: 'Hoàng Nam',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=80',
+    time: '1 ngày trước',
+    caption: 'Mù Cang Chải mùa vàng lúa chín đẹp rực rỡ! Vượt đèo Khau Phạ trong mây rồi thả dốc xuống thung lũng La Pán Tẩn, hương lúa mới ngào ngạt cả một góc trời.',
+    location: 'Mù Cang Chải, Yên Bái',
+    route: 'Hà Nội → Sơn Tây → Thanh Sơn → Thu Cúc → Khau Phạ → Mù Cang Chải',
+    distance: '300 km',
+    duration: '2 ngày 2 đêm',
+    images: [
+      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=600',
+      'https://images.unsplash.com/photo-1549880181-56a44cf4a9a5?q=80&w=600',
+    ],
+    likes: 215,
+    rating: 4.9,
+    ratingCount: 54,
+    comments: MOCK_COMMENTS['4'],
+  },
+  {
+    id: '5',
+    author: 'Quỳnh Chi',
+    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=80',
+    time: '2 ngày trước',
+    caption: 'Đèo Hải Vân — Thiên hạ đệ nhất hùng quan. Một bên là vách núi sừng sững, một bên là biển xanh ngắt vịnh Lăng Cô. Buổi chiều dừng chân uống nước dừa ngắm tàu hoả uốn lượn dưới chân đèo.',
+    location: 'Đèo Hải Vân, Đà Nẵng',
+    route: 'Đà Nẵng → Đỉnh đèo Hải Vân → Vịnh Lăng Cô → TP Huế',
+    distance: '105 km',
+    duration: '1 ngày',
+    images: [
+      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=600',
+      'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?q=80&w=600',
+    ],
+    likes: 188,
+    rating: 4.9,
+    ratingCount: 42,
+    comments: MOCK_COMMENTS['5'],
+  },
+  {
+    id: '6',
+    author: 'Lê Duy',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=80',
+    time: '3 ngày trước',
+    caption: 'Cung đường cát trắng Bàu Trắng — Mũi Né dài bất tận. Hai bên đường cát trắng mịn như sa mạc, gió biển thổi lồng lộng. Đi xe phân khối lớn ở cung này cảm giác tự do vô cùng!',
+    location: 'Bàu Trắng, Bình Thuận',
+    route: 'Phan Thiết → Mũi Né → Bàu Trắng → Phan Rí Cửa',
+    distance: '90 km',
+    duration: '1 ngày',
+    images: [
+      'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=600',
+      'https://images.unsplash.com/photo-1518684079-3c830dcef090?q=80&w=600',
+    ],
+    likes: 167,
+    rating: 4.7,
+    ratingCount: 29,
+    comments: MOCK_COMMENTS['6'],
+  },
+  {
+    id: '7',
+    author: 'Đăng Khoa',
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=80',
+    time: '4 ngày trước',
+    caption: 'Đèo Ô Quy Hồ — Vua đèo Tây Bắc. Hoàng hôn buông xuống cổng trời ngập tràn sắc vàng cam lộng lẫy, biển mây bồng bềnh dưới chân dãy Hoàng Liên Sơn hùng vĩ.',
+    location: 'Đèo Ô Quy Hồ, Sa Pa',
+    route: 'Sa Pa → Thác Bạc → Cổng Trời Ô Quy Hồ → Lai Châu',
+    distance: '120 km',
+    duration: '1 ngày',
+    images: [
+      'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=600',
+      'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=600',
+    ],
+    likes: 279,
+    rating: 5.0,
+    ratingCount: 76,
+    comments: MOCK_COMMENTS['7'],
+  },
 ];
 
 const GHEP_DOAN: GhepDoanItem[] = [
   { id: '1', author: 'Hải Nam', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=80', type: 'Tìm Ôm', title: 'Tìm ôm đi Tà Xùa 15-17/3', route: 'Hà Nội → Tà Xùa', vehicle: 'Winner X', expense: 'Camp 50/50', req: 'Có kinh nghiệm đi đèo' },
   { id: '2', author: 'Minh Trang', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=80', type: 'Tìm Xế', title: 'Cần xế cứng đi Hà Giang', route: 'Hà Giang Loop', vehicle: 'Tùy xế', expense: 'Bao xăng xế', req: 'Tay lái cứng' },
   { id: '3', author: 'Team FA', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=80', type: 'Ghép Đoàn', title: 'Đoàn 3 xe cần thêm 2 xe đi Đà Lạt', route: 'Sài Gòn → Đà Lạt', vehicle: 'Xe số/Côn tay', expense: 'Quỹ chung 1tr/ng', req: 'Vui vẻ hòa đồng' },
+  { id: '4', author: 'Đức Mạnh', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=80', type: 'Tìm Ôm', title: 'Tìm bạn đồng hành đi Mù Cang Chải ngắm lúa', route: 'Hà Nội → Mù Cang Chải', vehicle: 'Exciter 155', expense: 'Chia đều', req: 'Thích chụp ảnh, biết xem map' },
+  { id: '5', author: 'Lan Anh', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=80', type: 'Tìm Xế', title: 'Cần xế đi săn mây Tà Xùa cuối tuần', route: 'Hà Nội → Bắc Yên → Tà Xùa', vehicle: 'Côn tay/Ga', expense: 'Hỗ trợ ăn uống + xăng', req: 'Điềm đạm, an toàn' },
+  { id: '6', author: 'Phượt Thủ Tây Bắc', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=80', type: 'Ghép Đoàn', title: 'Tuyển thêm 3 xe chạy tứ đại đỉnh đèo', route: 'Hà Nội → Ô Quy Hồ → Khau Phạ → Mã Pí Lèng', vehicle: 'Phân khối lớn / Côn tay', expense: 'Tự túc 2.5tr/người', req: 'Đầy đủ giáp bảo hộ' },
 ];
 
 // Danh sách nhóm chat để share
@@ -556,14 +651,16 @@ const CommunityScreen = () => {
               <Text style={styles.captionText}>{post.caption}</Text>
 
               {/* Images */}
-              {post.images.length === 1 ? (
-                <Image source={{ uri: post.images[0] }} style={styles.singleImage} />
-              ) : (
-                <View style={styles.imageGrid}>
-                  <Image source={{ uri: post.images[0] }} style={styles.gridImageLeft} />
-                  <Image source={{ uri: post.images[1] }} style={styles.gridImageRight} />
-                </View>
-              )}
+              {post.images && post.images.length > 0 ? (
+                post.images.length === 1 ? (
+                  <Image source={{ uri: post.images[0] }} style={styles.singleImage} />
+                ) : (
+                  <View style={styles.imageGrid}>
+                    <Image source={{ uri: post.images[0] }} style={styles.gridImageLeft} />
+                    <Image source={{ uri: post.images[1] }} style={styles.gridImageRight} />
+                  </View>
+                )
+              ) : null}
 
               {/* Rating */}
               <View style={styles.ratingRow}>

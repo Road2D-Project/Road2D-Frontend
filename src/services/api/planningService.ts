@@ -4,6 +4,7 @@
  */
 import apiClient from './index';
 import { decodePolyline } from './goongMapService';
+import { USE_MOCK } from '../../config/env';
 
 export interface EnsureLocationResponse {
   locationId: string;
@@ -69,7 +70,34 @@ const planningService = {
    * POST /v1/planning/location
    */
   ensureLocation: async (placeId: string): Promise<EnsureLocationResponse> => {
+    if (USE_MOCK) {
+      return {
+        locationId: 'loc-mock-' + (placeId ? placeId.slice(0, 8) : 'rnd'),
+        placeId,
+        name: 'Địa điểm mô phỏng',
+        lat: 21.0285,
+        lng: 105.8542,
+      };
+    }
     const res = await apiClient.post<EnsureLocationResponse>('/planning/location', { placeId });
+    return res.data;
+  },
+
+  /**
+   * Tạo destination từ locationId
+   * POST /v1/planning/fork/:locationId
+   */
+  forkLocation: async (
+    locationId: string,
+    data: { name?: string; stayOverTime?: number } = {}
+  ): Promise<{ destinationId: string }> => {
+    if (USE_MOCK) {
+      return { destinationId: 'dest-mock-' + Date.now() };
+    }
+    const res = await apiClient.post<{ destinationId: string }>(`/planning/fork/${locationId}`, {
+      name: data.name || '',
+      stayOverTime: data.stayOverTime ?? 0,
+    });
     return res.data;
   },
 

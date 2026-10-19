@@ -235,6 +235,53 @@ export const goongMapService = {
       return null;
     }
   },
+
+  /**
+   * Reverse Geocode toạ độ lat, lng sang địa chỉ/tên địa điểm:
+   * GET /v1/goong/geocode?latlng=lat,lng
+   */
+  reverseGeocode: async (lat: number, lng: number): Promise<PlaceDetail | null> => {
+    try {
+      const activeKey = PLAYGROUND_KEY || DEFAULT_PLAYGROUND_KEY;
+      const baseUrl = getGoongApiBase();
+      const params = {
+        latlng: `${lat},${lng}`,
+        playground_key: activeKey,
+      };
+      const reqUrl = `${baseUrl}/goong/geocode`;
+      const res = await goongHttp.get(reqUrl, {
+        params,
+        headers: {
+          'X-Playground-Key': activeKey,
+        },
+      });
+      const firstResult = res.data?.results?.[0];
+      if (firstResult) {
+        return {
+          place_id: firstResult.place_id || `pin_${lat.toFixed(5)}_${lng.toFixed(5)}`,
+          name: firstResult.name || firstResult.formatted_address?.split(',')?.[0] || 'Vị trí đã chọn',
+          address: firstResult.formatted_address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+          lat,
+          lng,
+        };
+      }
+      return {
+        place_id: `pin_${lat.toFixed(5)}_${lng.toFixed(5)}`,
+        name: 'Vị trí đã chọn trên bản đồ',
+        address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        lat,
+        lng,
+      };
+    } catch {
+      return {
+        place_id: `pin_${lat.toFixed(5)}_${lng.toFixed(5)}`,
+        name: 'Vị trí đã chọn trên bản đồ',
+        address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        lat,
+        lng,
+      };
+    }
+  },
 };
 
 export default goongMapService;

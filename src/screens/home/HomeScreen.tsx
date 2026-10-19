@@ -69,7 +69,6 @@ const HomeScreen = () => {
   // Trips from Backend Store
   const trips = useTripStore((s) => s.trips);
   const activeTripId = useTripStore((s) => s.activeTripId);
-  const completedTripIds = useTripStore((s) => s.completedTripIds);
   const fetchTrips = useTripStore((s) => s.fetchTrips);
   const tripsLoading = useTripStore((s) => s.loading);
   const hasFetched = useTripStore((s) => s.hasFetched);
@@ -221,31 +220,32 @@ const HomeScreen = () => {
     extrapolate: 'clamp',
   });
 
-  // Filter Active, Upcoming, and Past Trips from real backend data + Local Storage (dùng useMemo tránh tạo array mới gây re-render vô tận)
-  const activeTrip = useMemo(() => {
-    return trips.find(
-      (t) =>
-        (t.id === activeTripId || t.status === 'ACTIVE' || (t.status as string) === 'active') &&
-        !completedTripIds.includes(t.id) &&
-        t.status !== 'COMPLETED'
-    );
-  }, [trips, activeTripId, completedTripIds]);
+  // Filter Active, Upcoming (Planning), and Past (Completed) trips thuần tuý từ Backend
+  const activeTrips = useMemo(() => {
+    return trips.filter((t) => {
+      const s = (t.status || '').toString().toUpperCase();
+      return s === 'ACTIVE' || s === 'STAY';
+    });
+  }, [trips]);
 
+  const activeTrip = activeTrips[0] || null;
+  const otherActiveTrips = useMemo(() => activeTrips.slice(1), [activeTrips]);
+
+  // PLANNING / LOCKED: Chuyến đi sắp tới
   const upcomingTrips = useMemo(() => {
-    return trips.filter(
-      (t) =>
-        t.status !== 'COMPLETED' &&
-        !completedTripIds.includes(t.id) &&
-        t.id !== activeTripId &&
-        t.status !== 'ACTIVE'
-    );
-  }, [trips, activeTripId, completedTripIds]);
+    return trips.filter((t) => {
+      const s = (t.status || '').toString().toUpperCase();
+      return s === 'PLANNING' || s === 'LOCKED';
+    });
+  }, [trips]);
 
+  // COMPLETED: Chuyến đã đi
   const pastTrips = useMemo(() => {
-    return trips.filter(
-      (t) => t.status === 'COMPLETED' || completedTripIds.includes(t.id)
-    );
-  }, [trips, completedTripIds]);
+    return trips.filter((t) => {
+      const s = (t.status || '').toString().toUpperCase();
+      return s === 'COMPLETED';
+    });
+  }, [trips]);
 
   const [searchUpcoming, setSearchUpcoming] = useState('');
 
@@ -417,6 +417,66 @@ const HomeScreen = () => {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Các chuyến đi đang diễn ra khác (nếu có nhiều hơn 1 trip active) */}
+        {otherActiveTrips.length > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            <View style={[styles.sectionHeader, { marginTop: 4, marginBottom: 8 }]}>
+              <Text style={[styles.sectionTitle, { color: C.primary }]}>CHUYẾN ĐI ĐANG DIỄN RA KHÁC</Text>
+            </View>
+            {otherActiveTrips.map((trip) => (
+              <TouchableOpacity
+                key={trip.id}
+                style={[styles.upcomingCard, { borderColor: '#4CAF50', borderWidth: 1.5 }]}
+                activeOpacity={0.88}
+                onPress={() => navigation.navigate('LiveTracking', { tripId: trip.id })}
+              >
+                <Image
+                  source={{
+                    uri:
+                      trip.coverImage ||
+                      'https://images.unsplash.com/photo-1549880181-56a44cf4a9a5?q=80&w=600',
+                  }}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+                />
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14 }]} />
+
+                <View style={styles.upcomingTopRow}>
+                  <View style={styles.upcomingInfoLeft}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 6 }} />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#B7D9CA', textTransform: 'uppercase' }}>Đang diễn ra</Text>
+                    </View>
+                    <Text style={styles.upcomingTitle} numberOfLines={1}>
+                      {trip.name}
+                    </Text>
+                    <View style={styles.dateRow}>
+                      <Feather name="calendar" size={14} color="#EAEAEA" />
+                      <Text style={styles.dateText}>{formatTripDate(trip.startAt)}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.upcomingBottomRow}>
+                  <View style={styles.bottomMetaRow}>
+                    <Feather name="users" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
+                    <Text style={styles.bottomMetaText}>
+                      {trip.members?.length ?? trip.currentMembers ?? 1}/{trip.maxMembers}
+                    </Text>
+                    <Text style={styles.bottomMetaDivider}>•</Text>
+                    <MaterialCommunityIcons name="motorbike" size={14} color="#EAEAEA" style={{ marginRight: 4 }} />
+                    <Text style={styles.bottomMetaText}>{trip.vehicle || 'Xe máy'}</Text>
+                  </View>
+
+                  <View style={styles.distanceRow}>
+                    <MaterialCommunityIcons name="map-marker-path" size={16} color="#EAEAEA" />
+                    <Text style={styles.distanceText}>{trip.distanceKm > 0 ? trip.distanceKm : 15} km</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* ── CHUYẾN ĐI SẮP TỚI ── */}
         <View style={[styles.sectionHeader, { marginTop: 6 }]}>

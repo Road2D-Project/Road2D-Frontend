@@ -23,6 +23,8 @@ export interface TrackingMember {
   signal: number | null;
   /** Mô tả vị trí ngắn */
   locationDesc: string;
+  /** Cảnh báo khẩn cấp SOS */
+  hasSOS?: boolean;
 }
 
 export interface Waypoint {
@@ -247,7 +249,7 @@ export const MOCK_TRIP: MockTripData = {
 // Màu sắc tương ứng với từng trạng thái (dùng trong cả UI RN lẫn HTML map)
 export const STATUS_COLORS: Record<MemberStatus, { bg: string; border: string; label: string; mapCircle: string }> = {
   normal: { bg: '#FFFFFF', border: '#FFFFFF', label: 'Bình thường', mapCircle: '#FFFFFF' },
-  lost: { bg: 'rgba(255,152,0,0.12)', border: '#FF9800', label: 'Lạc tuyến', mapCircle: '#FF9800' },
-  no_signal: { bg: 'rgba(100,100,100,0.10)', border: '#757575', label: 'Mất sóng', mapCircle: '#757575' },
-  lost_and_no_signal: { bg: 'rgba(255,82,82,0.12)', border: '#FF5252', label: 'Lạc + Mất sóng', mapCircle: '#FF5252' },
+  lost: { bg: 'rgba(117,117,117,0.15)', border: '#757575', label: 'Lạc đường', mapCircle: '#757575' },
+  no_signal: { bg: 'rgba(229,57,53,0.15)', border: '#E53935', label: 'Mất sóng', mapCircle: '#E53935' },
+  lost_and_no_signal: { bg: 'rgba(229,57,53,0.15)', border: '#E53935', label: 'Lạc + Mất sóng', mapCircle: '#E53935' },
 };

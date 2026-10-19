@@ -45,6 +45,7 @@ export type RootStackParamList = {
   TripHistory: undefined;
   Conversation: { chatId: string; chatName: string };
   ScanQR: undefined;
+  CreateBranch: { tripId: string };
 };
 
 // ─────────────────────────────────────────────
@@ -73,6 +74,7 @@ export type AllUpcomingTripsScreenNavigationProp = NativeStackNavigationProp<Roo
 export type TripHistoryScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'TripHistory'>;
 export type ConversationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 export type ScanQRScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ScanQR'>;
+export type CreateBranchScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CreateBranch'>;
 
 // Tab screens — có thể navigate cả trong Tab lẫn trong Stack nên dùng CompositeNavigationProp
 export type HomeScreenNavigationProp = CompositeNavigationProp<
@@ -103,3 +105,4 @@ export type TripDetailsRouteProp = RouteProp<RootStackParamList, 'TripDetails'>;
 export type CreateTripRouteProp = RouteProp<RootStackParamList, 'CreateTrip'>;
 export type TeamRosterRouteProp = RouteProp<RootStackParamList, 'TeamRoster'>;
 export type LiveTrackingRouteProp = RouteProp<RootStackParamList, 'LiveTracking'>;
+export type CreateBranchRouteProp = RouteProp<RootStackParamList, 'CreateBranch'>;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,17 +12,24 @@ import {
   Share,
   Modal,
   RefreshControl,
+  TextInput,
+  KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
 
 import type { TripDetailsScreenNavigationProp, TripDetailsRouteProp } from '../../types/navigation';
 import type { Trip } from '../../types';
 import tripService from '../../services/api/tripService';
+import { decodePolyline } from '../../services/api/goongMapService';
 import { useTripStore } from '../../store/useTripStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import { runtimeTripBranchesCache, runtimeCreatedReturnTripIds } from '../../services/storage/runtimeCache';
+import { SharedGoongMap, MapWaypoint } from '../../components/map/SharedGoongMap';
+import { BRANCH_PALETTES } from './CreateBranchScreen';
 
 // ─── Theme Tokens (Tuân thủ UI_GUIDELINES.md) ─────────────────────────────────
 const C = {
@@ -40,6 +47,25 @@ const C = {
   danger: '#D32F2F',
   dangerBg: '#FFEBEE',
 };
+
+// ─── Đa Nhánh Hành Trình Model & Color Palette ───────────────────────────────
+export interface TripBranch {
+  id: string;
+  name: string;        // Tên nhánh
+  purpose: string;     // Mục đích phân nhánh
+  color: string;       // Mã màu HEX hiển thị đường đi trên bản đồ
+  memberIds: string[]; // Danh sách ID thành viên tham gia nhánh này
+  coords?: [number, number][]; // Tọa độ route của nhánh
+  splitFromDestinationId?: string;
+  mergeToDestinationId?: string;
+  stops?: any[];
+}
+
+export const BRANCH_COLOR_PALETTE = BRANCH_PALETTES.map((p) => ({
+  label: p.label,
+  color: p.hex,
+}));
+
 
 // Định dạng ngày giờ có dấu phẩy giữa giờ và ngày: "08:30, 24/12/2026"
 function formatTripDate(isoString?: string): string {
@@ -98,6 +124,130 @@ const TripDetailsScreen = () => {
 
   const [isActionLoading, setIsActionLoading] = useState(false);
 
+  // ── Đa Nhánh Hành Trình State (Lấy thực tế từ Backend GET /trips/:tripId/graph) ────
+  const [branches, setBranches] = useState<TripBranch[]>([]);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  const [mainRouteCoords, setMainRouteCoords] = useState<[number, number][]>([]);
+  const [mainWaypoints, setMainWaypoints] = useState<MapWaypoint[]>([]);
+  const mapRef = useRef<any>(null);
+
+  // Tự động fetch đồ thị nhánh thực tế từ backend mỗi khi màn hình được focus
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      const fetchBranches = async () => {
+        if (!trip?.id) return;
+        try {
+          setIsLoadingBranches(true);
+          const graph = await tripService.getTripGraph(trip.id);
+          if (!isMounted) return;
+
+          if (graph && Array.isArray(graph.branches) && graph.branches.length > 0) {
+            // Nhánh index 0 là tuyến chính
+            const mainBranch = graph.branches[0];
+            if (mainBranch) {
+              let coords: [number, number][] = [];
+              if (mainBranch.travels && mainBranch.travels.length > 0) {
+                mainBranch.travels.forEach((t) => {
+                  if (t?.polyline) {
+                    coords.push(...decodePolyline(t.polyline));
+                  }
+                });
+              } else if (mainBranch.stops && mainBranch.stops.length > 0) {
+                mainBranch.stops.forEach((s) => {
+                  if (Number.isFinite(s.lng) && Number.isFinite(s.lat)) {
+                    coords.push([s.lng, s.lat]);
+                  }
+                });
+              }
+              if (coords.length > 0) {
+                setMainRouteCoords(coords);
+              }
+
+              if (mainBranch.stops && mainBranch.stops.length > 0) {
+                const wps: MapWaypoint[] = mainBranch.stops.map((s, idx) => ({
+                  id: s.destinationId || String(idx),
+                  name: s.name || (idx === 0 ? 'Điểm xuất phát' : idx === mainBranch.stops.length - 1 ? 'Điểm đến' : `Trạm ${idx + 1}`),
+                  lat: s.lat,
+                  lng: s.lng,
+                  type: (idx === 0 ? 'start' : idx === mainBranch.stops.length - 1 ? 'end' : 'stop') as 'start' | 'stop' | 'end',
+                }));
+                setMainWaypoints(wps);
+              }
+            }
+
+            // Các nhánh từ index 1 trở đi là nhánh phụ (lọc bỏ các nhánh rác không có điểm dừng)
+            const subBranches = graph.branches.slice(1).filter((b) => {
+              return (b.stops && b.stops.length >= 2) || (b.travels && b.travels.length > 0);
+            });
+
+            const formatted: TripBranch[] = subBranches
+              .map((b, idx) => {
+                const coords: [number, number][] = [];
+                if (b.travels && b.travels.length > 0) {
+                  b.travels.forEach((t) => {
+                    if (t?.polyline) {
+                      coords.push(...decodePolyline(t.polyline));
+                    }
+                  });
+                } else if (b.stops && b.stops.length > 0) {
+                  b.stops.forEach((s) => {
+                    if (Number.isFinite(s.lng) && Number.isFinite(s.lat)) {
+                      coords.push([s.lng, s.lat]);
+                    }
+                  });
+                }
+
+                const palColor = b.color || BRANCH_PALETTES[idx % BRANCH_PALETTES.length].hex;
+                const assignedMembers = (trip.members || []).filter(
+                  (m: any) => m.assignedBranchId === b.id
+                );
+
+                return {
+                  id: b.id,
+                  name: b.label || `Nhánh ${idx + 1}`,
+                  purpose: (b as any).purpose || `Khám phá cung đường nhánh ${idx + 1}`,
+                  color: palColor,
+                  memberIds: assignedMembers.map((m: any) => m.userId || m.id),
+                  coords,
+                  splitFromDestinationId: b.splitFromDestinationId,
+                  mergeToDestinationId: b.mergeToDestinationId,
+                  stops: b.stops,
+                };
+              })
+              .filter((b) => b.coords && b.coords.length >= 2);
+
+            setBranches(formatted);
+            runtimeTripBranchesCache.set(trip.id, formatted);
+          } else {
+            setBranches([]);
+            runtimeTripBranchesCache.set(trip.id, []);
+          }
+        } catch (err) {
+          console.warn('[TripDetailsScreen] getTripGraph error:', err);
+        } finally {
+          if (isMounted) setIsLoadingBranches(false);
+        }
+      };
+
+      fetchBranches();
+      return () => {
+        isMounted = false;
+      };
+    }, [trip?.id, trip?.members])
+  );
+
+  const handleFocusBranch = (branch: TripBranch) => {
+    if (branch.coords && branch.coords.length >= 2) {
+      mapRef.current?.postMessage(
+        JSON.stringify({
+          type: 'FOCUS_BRANCH',
+          coords: branch.coords,
+        })
+      );
+    }
+  };
+
   const fetchTripDetail = useCallback(async () => {
     if (!tripId) {
       setError('Thiếu mã định danh chuyến đi.');
@@ -155,7 +305,7 @@ const TripDetailsScreen = () => {
       await tripService.respondJoinRequest(tripId, userId, action);
       setJoinRequests((prev) => prev.filter((r) => r.userId !== userId));
       fetchTripDetail();
-    } catch {}
+    } catch { }
   };
 
   const handleShare = async () => {
@@ -167,12 +317,111 @@ const TripDetailsScreen = () => {
       await Share.share({
         message: `Tham gia chuyến đi "${trip.name}" trên Road2D cùng mình!${inviteMsg}`,
       });
-    } catch {}
+    } catch { }
   };
 
   const isLeader = trip?.leaderId === currentUserId || trip?.myRole === 'leader';
   const isTripActive = trip?.status === 'ACTIVE' || (trip?.status as string) === 'active';
   const isTripCompleted = trip?.status === 'COMPLETED' || (trip?.status as string) === 'completed';
+
+  // Kiểm tra chuyến đi này đã tạo chuyến đi về chưa (trong RAM hoặc danh sách trip hiện có)
+  const [hasReturnTrip, setHasReturnTrip] = useState<boolean>(() => {
+    return trip?.id ? runtimeCreatedReturnTripIds.has(trip.id) : false;
+  });
+  useEffect(() => {
+    if (trip?.id) {
+      setHasReturnTrip(runtimeCreatedReturnTripIds.has(trip.id));
+    }
+  }, [trip?.id]);
+
+  // Tạo chuyến đi về: đảo ngược điểm đầu, điểm cuối, các trạm dừng và clone thành viên
+  const handleCreateReturnTrip = async () => {
+    if (!trip) return;
+
+    const rawWaypoints = trip.waypoints || (trip as any).route?.waypoints || [];
+    let originDetail = null;
+    let destDetail = null;
+    let stopWaypoints: any[] = [];
+
+    if (Array.isArray(rawWaypoints) && rawWaypoints.length >= 2) {
+      const oldStart = rawWaypoints[0];
+      const oldEnd = rawWaypoints[rawWaypoints.length - 1];
+
+      // Đảo ngược: Điểm xuất phát mới = điểm đến cũ
+      originDetail = {
+        place_id: oldEnd.place_id || oldEnd.id || `origin_${trip.id}`,
+        name: oldEnd.name || 'Điểm xuất phát mới',
+        address: oldEnd.address || oldEnd.name || '',
+        lat: oldEnd.lat,
+        lng: oldEnd.lng,
+      };
+
+      // Điểm đến mới = điểm xuất phát cũ
+      destDetail = {
+        place_id: oldStart.place_id || oldStart.id || `dest_${trip.id}`,
+        name: oldStart.name || 'Điểm đến mới',
+        address: oldStart.address || oldStart.name || '',
+        lat: oldStart.lat,
+        lng: oldStart.lng,
+      };
+
+      // Đảo ngược thứ tự các trạm dừng ở giữa
+      if (rawWaypoints.length > 2) {
+        const intermediateStops = rawWaypoints.slice(1, -1);
+        stopWaypoints = [...intermediateStops].reverse().map((w: any, idx: number) => ({
+          place_id: w.place_id || w.id || `stop_${idx}`,
+          name: w.name || `Trạm dừng ${idx + 1}`,
+          address: w.address || w.name || '',
+          lat: w.lat,
+          lng: w.lng,
+          stayMinutes: w.stayMinutes || 15,
+        }));
+      }
+    } else {
+      let origName = 'Điểm xuất phát';
+      let destName = 'Điểm đến';
+      if (trip.name && (trip.name.includes('→') || trip.name.includes('->') || trip.name.includes(' - '))) {
+        const parts = trip.name.split(/→|->| - /);
+        origName = parts[1]?.trim() || 'Điểm xuất phát';
+        destName = parts[0]?.trim() || 'Điểm đến';
+      }
+      originDetail = {
+        place_id: `origin_ret_${trip.id}`,
+        name: origName,
+        address: origName,
+        lat: 10.8700,
+        lng: 106.8031,
+      };
+      destDetail = {
+        place_id: `dest_ret_${trip.id}`,
+        name: destName,
+        address: destName,
+        lat: 10.7725,
+        lng: 106.6980,
+      };
+    }
+
+    const returnTripName = trip.name
+      ? (trip.name.includes('→')
+        ? trip.name.split('→').map((p) => p.trim()).reverse().join(' → ')
+        : `${trip.name} (Chiều về)`)
+      : 'Chuyến đi về';
+
+    // Đánh dấu đã tạo chuyến đi về trong phiên chạy (RAM) để nút này ẩn đi
+    if (trip?.id) {
+      runtimeCreatedReturnTripIds.add(trip.id);
+    }
+    setHasReturnTrip(true);
+
+    // Chuyển sang CreateRouteScreen với dữ liệu đã đảo ngược để user xem trước & chỉnh sửa
+    (navigation as any).navigate('CreateRoute', {
+      initialOrigin: originDetail,
+      initialDestination: destDetail,
+      initialStops: stopWaypoints,
+      initialTripName: returnTripName,
+      initialMembers: trip.members || [],
+    });
+  };
 
   // Xuất phát ngay (CÂU 1: CHỈ TRƯỞNG ĐOÀN MỚI ĐƯỢC XUẤT PHÁT TRƯỚC GIỜ)
   const handleStartImmediately = () => {
@@ -189,6 +438,22 @@ const TripDetailsScreen = () => {
     }
     if (isTripActive) {
       navigation.navigate('LiveTracking', { tripId: trip.id });
+      return;
+    }
+
+    // RÀNG BUỘC: Mỗi thời điểm chỉ được phép CÓ DUY NHẤT 1 chuyến đi đang hoạt động
+    const allTrips = useTripStore.getState().trips;
+    const existingActiveTrip = allTrips.find(
+      (t) => (t.status === 'ACTIVE' || (t.status as string) === 'active' || (t.status as string) === 'STAY' || (t.status as string) === 'stay') && t.id !== trip.id
+    );
+    if (existingActiveTrip) {
+      setConfirmModal({
+        visible: true,
+        type: 'error',
+        title: 'Đang có chuyến đi hoạt động',
+        message: `Bạn đang có chuyến đi "${existingActiveTrip.name}" đang diễn ra. Mỗi thời điểm chỉ được phép có 1 chuyến đi trực tiếp. Vui lòng hoàn thành chuyến đi hiện tại trước khi bắt đầu chuyến mới!`,
+        confirmText: 'Đã hiểu',
+      });
       return;
     }
 
@@ -605,9 +870,161 @@ const TripDetailsScreen = () => {
           </View>
         </View>
 
-        {/* Thành viên: Chỉ hiện số lượng và nút "Tất cả thành viên", KHÔNG hiện danh sách thành viên ở đây */}
+        {/* ── ĐA NHÁNH HÀNH TRÌNH (TRÊN KHỐI THÀNH VIÊN) ───────────────────── */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
+            <View style={[styles.sectionHeaderLeft, { flex: 1, marginRight: 0 }]}>
+              <Feather name="git-branch" size={18} color={C.primary} />
+              <Text style={[styles.sectionTitle, { flex: 1 }]} numberOfLines={1}>
+                ĐA NHÁNH HÀNH TRÌNH {branches.length > 0 ? `(${branches.length})` : ''}
+              </Text>
+            </View>
+          </View>
+
+          {/* Bản đồ đa nhánh: chỉ hiển thị khi đã có ít nhất 1 nhánh rẽ */}
+          {branches.length > 0 && (
+            <View style={styles.branchMapWrap}>
+            <SharedGoongMap
+              ref={mapRef}
+              style={styles.branchMapPreview}
+              initialCenter={
+                mainRouteCoords.length > 0
+                  ? mainRouteCoords[0]
+                  : mainWaypoints.length > 0
+                  ? [mainWaypoints[0].lng, mainWaypoints[0].lat]
+                  : trip.waypoints?.[0]
+                  ? [trip.waypoints[0].lng, trip.waypoints[0].lat]
+                  : [106.8016, 10.8775]
+              }
+              waypoints={
+                mainWaypoints.length > 0
+                  ? mainWaypoints
+                  : trip.waypoints?.map((w, idx) => ({
+                      id: w.id || `wp-${idx}`,
+                      lat: w.lat,
+                      lng: w.lng,
+                      name: w.name,
+                      label: w.name,
+                      type: (idx === 0 ? 'start' : idx === (trip.waypoints?.length || 1) - 1 ? 'end' : 'stop') as 'start' | 'stop' | 'end',
+                    })) || []
+              }
+              routeCoords={
+                mainRouteCoords.length > 0
+                  ? mainRouteCoords
+                  : trip.route && trip.route.polyline
+                  ? (typeof trip.route.polyline === 'string' ? decodePolyline(trip.route.polyline) : trip.route.polyline)
+                  : []
+              }
+              branchRoutes={branches.map((b) => ({
+                id: b.id,
+                name: b.name,
+                color: b.color,
+                coords: b.coords || [],
+              }))}
+              interactive={true}
+              variant="brown"
+            />
+            <View style={styles.branchMapOverlayTag}>
+              <MaterialCommunityIcons name="routes" size={13} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.branchMapOverlayTagText}>Bản đồ đa nhánh</Text>
+            </View>
+          </View>
+          )}
+
+          {/* Danh sách các nhánh rẽ */}
+          {branches.length === 0 ? (
+            <View style={styles.emptyBranchBox}>
+              <MaterialCommunityIcons name="source-branch" size={32} color={C.border} />
+              <Text style={styles.emptyBranchText}>Chưa có nhánh rẽ nào được thiết lập.</Text>
+              <Text style={styles.emptyBranchSubText}>
+                Thêm đa nhánh để phân công các nhóm thành viên thực hiện mục đích khác nhau trên cung đường.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.branchListContainer}>
+              {branches.map((b, idx) => {
+                const assignedMembers = (trip.members || []).filter((m) =>
+                  b.memberIds.includes(m.userId || (m as any).id)
+                );
+                return (
+                  <View key={b.id || idx} style={styles.branchCardItem}>
+                    <View style={styles.branchCardHeader}>
+                      <View style={styles.branchCardHeaderLeft}>
+                        <View style={[styles.branchColorIndicator, { backgroundColor: b.color }]} />
+                        <Text style={styles.branchCardTitle} numberOfLines={1}>
+                          {b.name}
+                        </Text>
+                      </View>
+                      <View style={styles.branchCardHeaderActions}>
+                        <TouchableOpacity
+                          style={styles.branchMiniActionBtn}
+                          onPress={() => handleFocusBranch(b)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="eye-outline" size={16} color={C.primary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.branchPurposeBox}>
+                      <View style={styles.branchPurposeHeaderRow}>
+                        <Ionicons name="flag-outline" size={13} color={b.color} style={{ marginRight: 4 }} />
+                        <Text style={styles.branchPurposeLabel}>Mục đích:</Text>
+                      </View>
+                      <Text style={styles.branchPurposeText}>{b.purpose}</Text>
+                    </View>
+
+                    <View style={styles.branchFooterRow}>
+                      <View style={styles.branchColorBadgePill}>
+                        <View style={[styles.branchColorDot, { backgroundColor: b.color }]} />
+                        <Text style={styles.branchColorBadgeText}>
+                          {BRANCH_COLOR_PALETTE.find((c) => c.color.toLowerCase() === b.color.toLowerCase())?.label || b.color}
+                        </Text>
+                      </View>
+
+                      <View style={styles.branchMemberSummaryWrap}>
+                        <Feather name="users" size={13} color={C.sub} style={{ marginRight: 4 }} />
+                        <Text style={styles.branchMemberSummaryText}>
+                          {assignedMembers.length} thành viên
+                        </Text>
+                        <View style={styles.branchAvatarCluster}>
+                          {assignedMembers.slice(0, 3).map((m, mIdx) => (
+                            <Image
+                              key={m.userId || mIdx}
+                              source={{
+                                uri:
+                                  m.avatar ||
+                                  `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=CD853F&color=fff`,
+                              }}
+                              style={[
+                                styles.branchMiniAvatar,
+                                { marginLeft: mIdx > 0 ? -8 : 0 },
+                              ]}
+                            />
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Button Dài Thêm Đa Nhánh */}
+          <TouchableOpacity
+            style={styles.addBranchFullBtn}
+            onPress={() => navigation.navigate('CreateBranch', { tripId: trip.id })}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="source-branch" size={20} color="#FFF" style={{ marginRight: 8 }} />
+            <Text style={styles.addBranchFullBtnText}>THIẾT LẬP ĐA NHÁNH HÀNH TRÌNH</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Thành viên: Chỉ hiện số lượng và nút "Tất cả thành viên", KHÔNG hiện danh sách thành viên ở đây */}
+        <View style={styles.sectionCard}>
+          <View style={[styles.sectionHeader, { marginBottom: -3 }]}>
             <View style={styles.sectionHeaderLeft}>
               <Feather name="users" size={18} color={C.primary} />
               <Text style={styles.sectionTitle}>
@@ -628,23 +1045,55 @@ const TripDetailsScreen = () => {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Bottom Sticky Action Bar - ĐÃ XOÁ RỜI & HUỶ CHUYẾN Ở DƯỚI */}
+      {/* Bottom Sticky Action Bar */}
       <View style={styles.bottomBar}>
-        {/* Nút hành động chính: "Xuất phát ngay" / "Vào theo dõi" / "Đã hoàn thành" */}
-        <TouchableOpacity
-          style={[styles.primaryBtn, isTripCompleted && { backgroundColor: C.sub }]}
-          onPress={handleStartImmediately}
-        >
-          <MaterialCommunityIcons
-            name={isTripActive ? 'navigation-variant' : isTripCompleted ? 'check-circle-outline' : 'rocket-launch-outline'}
-            size={20}
-            color="#FFF"
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.primaryBtnText}>
-            {isTripActive ? 'Vào theo dõi hành trình' : isTripCompleted ? 'Hành trình đã kết thúc' : 'Xuất phát ngay'}
-          </Text>
-        </TouchableOpacity>
+        {isTripCompleted ? (
+          hasReturnTrip ? (
+            <TouchableOpacity
+              style={[styles.primaryBtn, { backgroundColor: C.sub }]}
+              onPress={handleStartImmediately}
+            >
+              <MaterialCommunityIcons
+                name="check-circle-outline"
+                size={20}
+                color="#FFF"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.primaryBtnText}>Hành trình đã kết thúc</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: '100%', gap: 8 }}>
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: C.primary }]}
+                onPress={handleCreateReturnTrip}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="swap-horizontal"
+                  size={20}
+                  color="#FFF"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.primaryBtnText}>Tạo chuyến đi về</Text>
+              </TouchableOpacity>
+            </View>
+          )
+        ) : (
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={handleStartImmediately}
+          >
+            <MaterialCommunityIcons
+              name={isTripActive ? 'navigation-variant' : 'rocket-launch-outline'}
+              size={20}
+              color="#FFF"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.primaryBtnText}>
+              {isTripActive ? 'Vào theo dõi hành trình' : 'Xuất phát ngay'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ── Modal 3 Chấm: Tuỳ chọn Rời / Huỷ chuyến đi ───────────────────── */}
@@ -765,18 +1214,18 @@ const TripDetailsScreen = () => {
                     confirmModal.type === 'success'
                       ? 'checkmark-circle'
                       : confirmModal.type === 'delete'
-                      ? 'trash-outline'
-                      : confirmModal.type === 'leave'
-                      ? 'log-out-outline'
-                      : 'information-circle'
+                        ? 'trash-outline'
+                        : confirmModal.type === 'leave'
+                          ? 'log-out-outline'
+                          : 'information-circle'
                   }
                   size={44}
                   color={
                     confirmModal.type === 'leave' || confirmModal.type === 'delete' || confirmModal.type === 'error'
                       ? C.danger
                       : confirmModal.type === 'success'
-                      ? C.success
-                      : C.primary
+                        ? C.success
+                        : C.primary
                   }
                 />
               )}
@@ -1685,6 +2134,392 @@ const styles = StyleSheet.create({
     color: C.sub,
     textAlign: 'center',
     lineHeight: 16,
+  },
+
+  // ── Đa Nhánh Hành Trình Styles ──
+  branchCountBadge: {
+    backgroundColor: '#FAF5EE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchCountBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.primary,
+  },
+  branchMapWrap: {
+    height: 200,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  branchMapPreview: {
+    ...StyleSheet.absoluteFill,
+  },
+  branchMapOverlayTag: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(93, 58, 41, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  branchMapOverlayTagText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  emptyBranchBox: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+  },
+  emptyBranchText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.heading,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  emptyBranchSubText: {
+    fontSize: 12,
+    color: C.sub,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  branchListContainer: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  branchCardItem: {
+    backgroundColor: '#FAF7F2',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  branchCardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  branchColorIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  branchCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: C.heading,
+    flex: 1,
+  },
+  branchCardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  branchMiniActionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#FFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchPurposeBox: {
+    backgroundColor: '#FFF',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchPurposeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
+  branchPurposeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.sub,
+  },
+  branchPurposeText: {
+    fontSize: 12.5,
+    color: C.text,
+    lineHeight: 18,
+  },
+  branchFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  branchColorBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchColorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  branchColorBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  branchMemberSummaryWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  branchMemberSummaryText: {
+    fontSize: 11,
+    color: C.sub,
+    fontWeight: '600',
+    marginRight: 6,
+  },
+  branchAvatarCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  branchMiniAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: '#FFF',
+  },
+  addBranchFullBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.primary,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    shadowColor: C.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  addBranchFullBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: 0.5,
+  },
+
+  // ── Modal Tạo / Sửa Nhánh Styles ──
+  branchModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+  },
+  branchModalContainer: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  branchModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  branchModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: C.heading,
+  },
+  branchModalBody: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  branchInputGroup: {
+    marginBottom: 16,
+  },
+  branchInputLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.heading,
+    marginBottom: 6,
+  },
+  branchTextInput: {
+    backgroundColor: '#FAF7F2',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: C.heading,
+  },
+  branchColorLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  branchColorLivePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    backgroundColor: '#FAF5EE',
+  },
+  branchColorLivePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  branchColorPaletteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  branchColorOptionBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  branchColorOptionSelected: {
+    borderWidth: 3,
+    borderColor: '#FFF',
+    transform: [{ scale: 1.15 }],
+  },
+  branchMembersHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  branchSelectAllText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.primary,
+  },
+  branchMemberList: {
+    maxHeight: 180,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+    borderRadius: 14,
+    backgroundColor: '#FAF7F2',
+    overflow: 'hidden',
+  },
+  branchMemberCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderLight,
+  },
+  branchMemberCheckRowActive: {
+    backgroundColor: '#FFF8F0',
+  },
+  branchMemberAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: C.borderLight,
+  },
+  branchMemberName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  branchMemberRole: {
+    fontSize: 11,
+    color: C.sub,
+    marginTop: 1,
+  },
+  branchCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+  },
+  branchModalActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  branchModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#F5ECE3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  branchModalCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.heading,
+  },
+  branchModalSaveBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: C.primary,
+  },
+  branchModalSaveText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFF',
   },
 });
 

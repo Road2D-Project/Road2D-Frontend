@@ -50,7 +50,6 @@ const TripHistoryScreen = () => {
   const navigation = useNavigation<TripHistoryScreenNavigationProp>();
 
   const trips = useTripStore((s) => s.trips);
-  const completedTripIds = useTripStore((s) => s.completedTripIds);
   const fetchTrips = useTripStore((s) => s.fetchTrips);
   const loading = useTripStore((s) => s.loading);
 
@@ -69,12 +68,13 @@ const TripHistoryScreen = () => {
     setRefreshing(false);
   }, [fetchTrips]);
 
-  // Các chuyến đi đã đi (hoàn thành)
+  // Các chuyến đi đã đi (hoàn thành) lấy trực tiếp từ Backend
   const pastTrips = useMemo(() => {
-    return trips.filter(
-      (t) => t.status === 'COMPLETED' || completedTripIds.includes(t.id)
-    );
-  }, [trips, completedTripIds]);
+    return trips.filter((t) => {
+      const s = (t.status || '').toString().toUpperCase();
+      return s === 'COMPLETED';
+    });
+  }, [trips]);
 
   // Lọc theo thanh tìm kiếm
   const filteredPastTrips = useMemo(() => {

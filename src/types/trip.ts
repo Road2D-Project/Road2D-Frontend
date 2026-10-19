@@ -134,6 +134,7 @@ export interface BackendTripMemberResponse {
 
 /** Khớp với DTO Backend CreateTripRequest (module/trip/model/request/CreateTripRequest.go) */
 export interface BackendCreateTripRequest {
+  idempotencyKey: string;
   name: string;
   note: string;
   startTime?: string;
@@ -149,6 +150,7 @@ export type CreateTripPayload = Pick<
   Trip,
   'name' | 'routeId' | 'routeName' | 'distanceKm' | 'startAt' | 'vehicle' | 'maxMembers' | 'isPublic' | 'note' | 'coverImage' | 'durationDays'
 > & {
+  idempotencyKey?: string;
   tripType?: TripType;
   invitedUserIds: string[];
 };

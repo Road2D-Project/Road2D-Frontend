@@ -12,6 +12,7 @@ import AllUpcomingTripsScreen from '../screens/home/AllUpcomingTripsScreen';
 import TripHistoryScreen from '../screens/home/TripHistoryScreen';
 import ConversationScreen from '../screens/chat/ConversationScreen';
 import ScanQRScreen from '../screens/trip/ScanQRScreen';
+import CreateBranchScreen from '../screens/trip/CreateBranchScreen';
 import TabNavigator from './TabNavigator';
 import { LoadingScreen } from '../components/common/LoadingScreen';
 import type { RootStackParamList } from '../types/navigation';
@@ -74,6 +75,9 @@ const AppNavigator = () => {
 
             {/* Chat */}
             <Stack.Screen name="Conversation" component={ConversationScreen} />
+
+            {/* Branch flow */}
+            <Stack.Screen name="CreateBranch" component={CreateBranchScreen} />
 
             {/* QR Scanner */}
             <Stack.Screen name="ScanQR" component={ScanQRScreen} />

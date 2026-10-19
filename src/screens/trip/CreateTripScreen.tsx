@@ -35,8 +35,9 @@ import { useTripStore } from '../../store/useTripStore';
 import QRCode from 'react-native-qrcode-svg';
 import friendService, { FriendItem } from '../../services/api/friendService';
 import planningService, { RoutePreviewSummary } from '../../services/api/planningService';
+import tripService, { generateUUID } from '../../services/api/tripService';
+import { runtimeTripRouteCache } from '../../services/storage/runtimeCache';
 import CustomDateTimePickerModal from '../../components/common/CustomDateTimePickerModal';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -311,6 +312,7 @@ const CreateTripScreen = () => {
   const [showQrModal, setShowQrModal] = useState(false);
   const currentTripId = useTripStore((s: any) => s.currentTripId);
   const createTrip = useTripStore((s: any) => s.createTrip);
+  const wizardIdempotencyKeyRef = React.useRef(generateUUID());
 
   // Preview route via planning API (v1/planning/review / preview)
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
@@ -426,6 +428,7 @@ const CreateTripScreen = () => {
         : `Thời gian ở lại: ${durationNote}`;
 
       const payload = {
+        idempotencyKey: wizardIdempotencyKeyRef.current,
         name: tripName || selectedRoute.name,
         routeId: selectedRoute.id,
         routeName: selectedRoute.name,
@@ -441,24 +444,41 @@ const CreateTripScreen = () => {
         coverImage: selectedRoute.image,
       };
       const trip = await createTrip(payload);
+      wizardIdempotencyKeyRef.current = generateUUID();
+
+      // Lưu lộ trình chính, trạm dừng & polyline trực tiếp vào Database Backend (PostgreSQL)
       if (trip?.id && selectedRoute) {
         try {
-          await AsyncStorage.setItem(
-            `trip_route_${trip.id}`,
-            JSON.stringify({
-              origin: selectedRoute.origin,
-              destination: selectedRoute.destination,
-              waypoints: selectedRoute.waypoints || [],
-              polylineCoords: selectedRoute.polylineCoords || [],
-              legs: selectedRoute.legs || [],
-              distanceKm: realDist,
-              name: selectedRoute.name,
-            })
-          );
-        } catch (storageErr) {
-          console.warn('Lỗi lưu trip_route:', storageErr);
+          const wpsToSave: any[] = Array.isArray(selectedRoute.waypoints) && selectedRoute.waypoints.length >= 2
+            ? selectedRoute.waypoints
+            : (selectedRoute.origin && selectedRoute.destination
+                ? [selectedRoute.origin, ...(selectedRoute.stops || []), selectedRoute.destination]
+                : []);
+
+          if (wpsToSave.length >= 2) {
+            const destIds: string[] = [];
+            for (const wp of wpsToSave) {
+              const placeId = wp.place_id || wp.id || `loc_${wp.lat}_${wp.lng}`;
+              const loc = await planningService.ensureLocation(placeId);
+              const forked = await planningService.forkLocation(loc.locationId, {
+                name: wp.name || 'Điểm dừng',
+                stayOverTime: wp.stayMinutes || 0,
+              });
+              destIds.push(forked.destinationId);
+            }
+            if (destIds.length >= 2) {
+              await tripService.setTripGraph(trip.id, [destIds], [false]);
+              await tripService.computeStoredTravels(trip.id);
+            }
+          }
+          if (Array.isArray(selectedRoute.polylineCoords) && selectedRoute.polylineCoords.length >= 2) {
+            runtimeTripRouteCache.set(trip.id, selectedRoute.polylineCoords);
+          }
+        } catch (graphSaveErr) {
+          console.warn('[CreateTripScreen] Warning saving initial main branch to backend DB:', graphSaveErr);
         }
       }
+
       // Mã mời / invite token đã được tripService xử lý chuẩn với backend
       const inviteCode = (trip as any)?.inviteCode || 'R2D-' + Math.random().toString(36).slice(2, 7).toUpperCase();
       setCreatedInviteCode(inviteCode);

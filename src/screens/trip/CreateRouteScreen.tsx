@@ -44,10 +44,10 @@ import {
 import planningService, { RoutePreviewSummary } from '../../services/api/planningService';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-// Chiều cao map khi bàn phím đóng: vừa vặn để hiện đủ cả 2 ô Xuất phát & Điểm đến mà không cần cuộn
-const NORMAL_MAP_HEIGHT = Math.min(Math.max(Math.round(SCREEN_HEIGHT * 0.38), 240), 315);
-// Chiều cao map khi bàn phím mở: co lại 140px để panel trồi lên trên bàn phím
-const KEYBOARD_MAP_HEIGHT = 140;
+// Chiều cao map khi bàn phím đóng: mở rộng bản đồ chiếm trọn không gian, ôm sát cụm ô nhập bên dưới
+const NORMAL_MAP_HEIGHT = Math.max(Math.round(SCREEN_HEIGHT * 0.62), SCREEN_HEIGHT - 280);
+// Chiều cao map khi bàn phím mở: co lại 120px để panel trồi lên trên bàn phím
+const KEYBOARD_MAP_HEIGHT = 120;
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const C = {
@@ -239,9 +239,9 @@ const sb = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,
-    paddingHorizontal: 12,
-    minHeight: 46,
-    marginBottom: 6,
+    paddingHorizontal: 10,
+    minHeight: 40,
+    marginBottom: 4,
     overflow: 'hidden',
   },
   inputRowFocused: {
@@ -249,24 +249,24 @@ const sb = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    marginRight: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
     flexShrink: 0,
   },
   input: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     color: C.text,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    height: 44,
+    height: 38,
     textAlignVertical: 'center',
     minWidth: 0,
   },
   inputClearBtn: {
-    padding: 6,
+    padding: 5,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 4,
@@ -279,23 +279,23 @@ const sb = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: C.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minHeight: 52,
-    marginBottom: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    minHeight: 44,
+    marginBottom: 4,
     overflow: 'hidden',
   },
   selectedText: {
     flex: 1,
     flexShrink: 1,
-    marginRight: 8,
+    marginRight: 6,
     minWidth: 0,
     overflow: 'hidden',
   },
   clearBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#EAE1D7',
     alignItems: 'center',
     justifyContent: 'center',
@@ -460,6 +460,21 @@ export const CreateRouteScreen: React.FC = () => {
     return legs.flatMap((l) => l.coords);
   }, [legs]);
 
+  // Tự động focus camera vào điểm vừa chọn (khi chỉ có 1 điểm)
+  useEffect(() => {
+    if (allWaypoints.length === 1 && webviewRef.current) {
+      const wp = allWaypoints[0];
+      webviewRef.current.postMessage(
+        JSON.stringify({
+          type: 'FLY_TO',
+          lat: wp.lat,
+          lng: wp.lng,
+          zoom: 15,
+        })
+      );
+    }
+  }, [allWaypoints]);
+
   // ── Stop search ──
   const handleStopQuery = useCallback(
     (text: string) => {
@@ -507,6 +522,29 @@ export const CreateRouteScreen: React.FC = () => {
     const m = mins % 60;
     return `${h} giờ ${m > 0 ? `${m}p` : ''}`;
   };
+
+  // Giữ tay trên map 2s để chọn điểm trực tiếp
+  const handleMapLongPress = useCallback(async (coord: { lat: number; lng: number }) => {
+    try {
+      const place = await goongMapService.reverseGeocode(coord.lat, coord.lng);
+      if (!place) return;
+
+      if (phase === 0) {
+        if (!origin) {
+          setOrigin(place);
+          Alert.alert('Đã chọn điểm xuất phát', place.name);
+        } else {
+          setDestination(place);
+          Alert.alert('Đã chọn điểm đến', place.name);
+        }
+      } else if (phase === 1) {
+        setStops((prev) => [...prev, { ...place, stayMinutes: 15 }]);
+        Alert.alert('Đã thêm điểm dừng', place.name);
+      }
+    } catch (err) {
+      console.warn('[CreateRouteScreen] Long press error:', err);
+    }
+  }, [phase, origin]);
 
   // ── Tự động tính tuyến đường khi đã chọn đủ điểm xuất phát và điểm đến (hiển thị trực tiếp trên map như Google Maps) ──
   useEffect(() => {
@@ -660,7 +698,7 @@ export const CreateRouteScreen: React.FC = () => {
 
   // ── CTA Helpers ──
   const getCtaLabel = () => {
-    if (phase === 0) return canProceed ? 'Thêm điểm dừng' : 'Chọn điểm đầu & điểm đến';
+    if (phase === 0) return canProceed ? 'Thêm điểm dừng' : 'Tiếp tục';
     return routeLoading ? 'Đang tính lộ trình...' : 'Hoàn tất';
   };
 
@@ -717,47 +755,6 @@ export const CreateRouteScreen: React.FC = () => {
           }, 100);
         }}
       />
-      {/* Thẻ hiển thị khoảng cách và thời gian dự kiến lộ trình (tự động hiện khi chọn đủ 2 điểm, không dùng popup) */}
-      {canProceed && (
-        <View style={styles.routeDirectCard}>
-          {isPreviewLoading ? (
-            <View style={styles.routeDirectLoadingWrap}>
-              <ActivityIndicator size="small" color={C.primary} />
-              <Text style={styles.routeDirectLoadingText}>Đang tính toán tuyến đường...</Text>
-            </View>
-          ) : (
-            <View style={styles.routeDirectContent}>
-              <View style={styles.routeDirectMetric}>
-                <View style={styles.routeDirectIconCircle}>
-                  <Ionicons name="navigate-outline" size={17} color={C.primary} />
-                </View>
-                <View style={styles.routeDirectTextCol}>
-                  <Text style={styles.routeDirectLabel}>KHOẢNG CÁCH</Text>
-                  <Text style={styles.routeDirectValue}>
-                    {previewSummary?.distanceFormatted ||
-                      (legs[0] ? fmtDistance(legs[0].distanceM) : '--')}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.routeDirectDivider} />
-
-              <View style={styles.routeDirectMetric}>
-                <View style={styles.routeDirectIconCircle}>
-                  <Ionicons name="time-outline" size={17} color={C.primary} />
-                </View>
-                <View style={styles.routeDirectTextCol}>
-                  <Text style={styles.routeDirectLabel}>THỜI GIAN DỰ KIẾN</Text>
-                  <Text style={styles.routeDirectValue}>
-                    {previewSummary?.durationFormatted ||
-                      (legs[0] ? fmtDuration(legs[0].durationS) : '--')}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          )}
-        </View>
-      )}
     </View>
   );
 
@@ -945,11 +942,15 @@ export const CreateRouteScreen: React.FC = () => {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Bản đồ: Ở Phase 0 co dãn từ từ bằng Animated.View mapHeightAnim */}
+        {/* Bản đồ: Ở Phase 0 khi không mở bàn phím chiếm trọn không gian flex: 1, khi mở bàn phím co lại */}
         <Animated.View
           style={[
             styles.mapWrap,
-            phase === 0 ? { height: mapHeightAnim } : { height: 240 },
+            phase === 0
+              ? isKeyboardVisible
+                ? { height: KEYBOARD_MAP_HEIGHT }
+                : { flex: 1 }
+              : { height: 240 },
           ]}
         >
           <SharedGoongMap
@@ -958,23 +959,45 @@ export const CreateRouteScreen: React.FC = () => {
             waypoints={mapWaypoints}
             routeCoords={routeCoords}
             variant="default"
+            onMapLongPress={handleMapLongPress}
           />
-          {/* Badge on map (ẩn khi bàn phím mở để không che map) */}
-          {!isKeyboardVisible && (
+          {/* Floating Metric Card (Khoảng cách & Thời gian) ở giữa trên bản đồ */}
+          {canProceed && (previewSummary || legs.length > 0) ? (
+            <View style={styles.floatingMetricCard} pointerEvents="none">
+              {isPreviewLoading ? (
+                <View style={styles.floatingMetricLoading}>
+                  <ActivityIndicator size="small" color={C.primary} style={{ marginRight: 6 }} />
+                  <Text style={styles.floatingMetricLoadingText}>Đang tính toán tuyến...</Text>
+                </View>
+              ) : (
+                <View style={styles.floatingMetricContent}>
+                  <View style={styles.floatingMetricItem}>
+                    <Ionicons name="navigate" size={14} color={C.primary} style={{ marginRight: 4 }} />
+                    <Text style={styles.floatingMetricVal}>
+                      {previewSummary?.distanceFormatted || (legs[0] ? fmtDistance(legs[0].distanceM) : '--')}
+                    </Text>
+                  </View>
+                  <View style={styles.floatingMetricDivider} />
+                  <View style={styles.floatingMetricItem}>
+                    <Ionicons name="time" size={14} color={C.primary} style={{ marginRight: 4 }} />
+                    <Text style={styles.floatingMetricVal}>
+                      {previewSummary?.durationFormatted || (legs[0] ? fmtDuration(legs[0].durationS) : '--')}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </View>
+          ) : !isKeyboardVisible ? (
             <View style={styles.mapBadge} pointerEvents="none">
               <Text style={styles.mapBadgeText}>
                 {phase === 0
-                  ? canProceed
-                    ? isPreviewLoading
-                      ? 'Đang tính lộ trình xe máy...'
-                      : 'Đã hiển thị lộ trình trên bản đồ'
-                    : 'Tìm kiếm điểm đầu và đích bên dưới'
+                  ? 'Tìm kiếm hoặc giữ 4 - 5s trên bản đồ để chọn điểm'
                   : routeLoading
                     ? 'Đang tính lộ trình qua backend...'
                     : 'Thêm điểm dừng · Bấm "Hoàn tất" để xác nhận'}
               </Text>
             </View>
-          )}
+          ) : null}
           {routeLoading && (
             <View style={styles.routeLoader}>
               <ActivityIndicator color={C.primary} size="large" />
@@ -983,9 +1006,9 @@ export const CreateRouteScreen: React.FC = () => {
           )}
         </Animated.View>
 
-        {/* Bottom panel: Luôn hiển thị đầy đủ, mượt mà bám sát dưới bản đồ */}
+        {/* Bottom panel: Luôn hiển thị đầy đủ, mượt mà bám sát dưới bản đồ, không có khoảng trống thừa */}
         {phase === 0 ? (
-          <View style={styles.phase0Container}>
+          <View style={[styles.phase0Container, isKeyboardVisible && { flex: 1 }]}>
             <ScrollView
               ref={scrollRef}
               style={styles.scrollPhase0}
@@ -1090,17 +1113,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   phase0Container: {
-    flex: 1,
     backgroundColor: C.bg,
   },
   scrollPhase0: {
-    flex: 1,
     backgroundColor: C.bg,
   },
   scrollContentPhase0: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   webview: {
     flex: 1,
@@ -1120,6 +1141,51 @@ const styles = StyleSheet.create({
   mapBadgeText: {
     color: '#FDFBF7',
     fontSize: 11,
+    fontWeight: '600',
+  },
+  floatingMetricCard: {
+    position: 'absolute',
+    top: 12,
+    alignSelf: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#EFEBE6',
+    zIndex: 10,
+  },
+  floatingMetricContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingMetricItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingMetricVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#2A1810',
+  },
+  floatingMetricDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: '#E0D5CC',
+    marginHorizontal: 10,
+  },
+  floatingMetricLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingMetricLoadingText: {
+    fontSize: 12,
+    color: C.heading,
     fontWeight: '600',
   },
   routeLoader: {
@@ -1144,34 +1210,34 @@ const styles = StyleSheet.create({
   },
   panel: {
     backgroundColor: C.card,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 14,
+    padding: 10,
     borderWidth: 1,
     borderColor: C.border,
     overflow: 'hidden',
   },
   panelLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     color: C.sub,
-    letterSpacing: 0.8,
-    marginBottom: 8,
+    letterSpacing: 0.6,
+    marginBottom: 2,
   },
   panelHint: {
     fontSize: 12,
     color: C.sub,
-    marginBottom: 12,
-    lineHeight: 17,
+    marginBottom: 8,
+    lineHeight: 16,
   },
   divLine: {
     height: 1,
     backgroundColor: C.border,
-    marginVertical: 10,
+    marginVertical: 4,
   },
   swapDividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 10,
+    marginVertical: 2,
     justifyContent: 'center',
   },
   swapDividerLine: {
@@ -1183,20 +1249,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FAF5EE',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     marginHorizontal: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.06,
     shadowRadius: 2,
     elevation: 1,
   },
   swapBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: C.primary,
   },
